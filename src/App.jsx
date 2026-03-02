@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, createContext, useContext, useReducer, useEffect } from "react";
+import { useState, useRef, useCallback, createContext, useContext, useReducer, useEffect, useMemo } from "react";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile } from "@ffmpeg/util";
 
@@ -8,6 +8,7 @@ function hexToRgba(hex, op) {
   return `rgba(${(b >> 16) & 255},${(b >> 8) & 255},${b & 255},${op / 100})`;
 }
 function pickRandom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 
 // ━━━ COLOR PRESETS ━━━
 const COLOR_PRESETS = {
@@ -27,7 +28,6 @@ const COLOR_PRESETS = {
 function parseInput(text) {
   const lines = text.trim().split("\n").map(l => l.trim()).filter(Boolean);
   if (lines.length === 0) return { type: "empty", title: "", rows: [] };
-
   const title = lines[0];
   let subtitle = "";
   let type = "list";
@@ -35,22 +35,11 @@ function parseInput(text) {
   let colBLabel = "";
   const rows = [];
   let startIdx = 1;
-
   if (lines.length > 1 && /\bvs\.?\b/i.test(lines[1])) {
     const parts = lines[1].split(/\s+vs\.?\s+/i);
-    if (parts.length === 2) {
-      colALabel = parts[0].trim();
-      colBLabel = parts[1].trim();
-      type = "compare";
-      startIdx = 2;
-    }
+    if (parts.length === 2) { colALabel = parts[0].trim(); colBLabel = parts[1].trim(); type = "compare"; startIdx = 2; }
   }
-
-  if (type === "list" && lines.length > 1 && !lines[1].includes("|") && !lines[1].includes(":")) {
-    subtitle = lines[1];
-    startIdx = 2;
-  }
-
+  if (type === "list" && lines.length > 1 && !lines[1].includes("|") && !lines[1].includes(":")) { subtitle = lines[1]; startIdx = 2; }
   for (let i = startIdx; i < lines.length; i++) {
     const line = lines[i];
     if (type === "compare" && line.includes("|")) {
@@ -85,28 +74,16 @@ const EXAMPLES = [
   { name: "👨‍👩‍👧 Familie", color: "gelb_rot", text: "Andere Zeiten, Andere Realität?!\nFamilie 2026 vs Familie 1980\nArbeit: Beide Vollzeit | Ein Gehalt reicht\nEinkommen: Zwei Gehälter Pflicht | Ein Gehalt reicht\nWohnen: Kaum erreichbar | Eigenheim\nAuto: 2x Leasing | Eins gekauft\nFazit: Trotzdem knapp | Stabiles Leben ✅" },
   { name: "🏥 Krank Vergleich", color: "gelb_schwarz", text: "Das gibt's vom Staat\nBeamter vs Selbständiger\nEinkommen: 5.000€ | 5.000€\n0-6 Wochen: 5.000€ | 0€\n7-72 Wochen: 5.000€ | 0€ (ohne KG)\n+72 Wochen: 5.000€ | 850-1.700€\nAb 10 J.: 2.000€ | 850-1.700€" },
   { name: "🏠 Mieten vs Kaufen", color: "rot_weiss", text: "Mieten oder Kaufen?\nMieter vs Käufer\nMonatlich: 1.200€ Miete | 1.400€ Rate\nNach 10 J.: 0€ Vermögen | 80.000€ Equity\nNach 30 J.: 0€ Vermögen | 350.000€ Eigentum\nFlexibilität: Hoch ✅ | Gering ❌\nSteuerlich: Keine Vorteile | AfA + Zinsen absetzbar\nFazit: Bequem, aber teuer | Vermögen aufgebaut ✅" },
-  { name: "🏢 GmbH vs Einzeluntern.", color: "blau_rot", text: "Rechtsform Vergleich\nGmbH vs Einzelunternehmer\nHaftung: Beschränkt ✅ | Unbeschränkt ❌\nGründungskosten: ~1.000€ | 0€\nSteuerlast: ~30% KSt+GewSt | bis 45% ESt\nBuchhaltung: Doppelt | Einfach\nImage: Professionell | Weniger seriös\nVerkauf möglich: Ja ✅ | Schwierig" },
-  { name: "💼 Angestellt vs Selbst.", color: "blau_gelb", text: "Karriere-Entscheidung\nAngestellter vs Selbständiger\nSicherheit: Festgehalt | Schwankend\nEinkommen: Gedeckelt | Unbegrenzt ✅\nUrlaub: 30 Tage | Selbst bestimmen\nRente: Gesetzlich | Selbst vorsorgen\nSteuern: Lohnsteuer | Optimierbar ✅\nFreiheit: Chef bestimmt | Du bestimmst ✅" },
-  { name: "🇩🇪🇦🇪 DE vs Dubai", color: "gelb_schwarz", text: "Standort Vergleich\nDeutschland vs Dubai\nEinkommensteuer: bis 45% | 0% ✅\nKörperschaftsteuer: ~30% | 9%\nLebenshaltung: Mittel | Hoch\nWetter: 🌧️ | ☀️ 365 Tage\nBürokratie: Hoch ❌ | Gering ✅\nNetzwerk: Lokal | International ✅" },
-  { name: "📊 ETF vs Immobilie", color: "gruen_blau", text: "Rendite Vergleich\nETF-Sparplan vs Immobilie\nEinstieg: Ab 25€/Monat | Ab 20.000€\nRendite: ~7% p.a. | ~4-6% + Miete\nHebel: Kein Hebel | Fremdkapital ✅\nSteuer: 26,4% Abgeltung | AfA optimierbar ✅\nAufwand: Passiv ✅ | Aktiv (Verwaltung)\nInflationsschutz: Indirekt | Direkt ✅" },
-  { name: "🏦 Festgeld vs Aktien", color: "schwarz_weiss", text: "Wo parke ich 50.000€?\nFestgeld vs Aktien\nRendite 2025: ~3% | ~8-12%\nRisiko: Kein Verlust | Schwankungen\nLiquidität: Gebunden | Jederzeit\nInflationsschutz: Nein ❌ | Ja ✅\nSteuer: Abgeltung | Abgeltung\nFazit: Sicher, verliert real | Chancen + Risiken" },
   { name: "💰 Investment Start", color: "schwarz_weiss", text: "01.01.2025\nWenn du 10.000€ investiert hättest\n🥇 Gold: 10.000€\n📈 S&P 500: 10.000€\n🏦 Commerzbank: 10.000€\n📕 Sparbuch: 10.000€\n🎯 NVIDIA: 10.000€" },
   { name: "📊 Investment Ergebnis", color: "gelb_rot", text: "2026\nWenn meine Eltern 100€/Monat investiert hätten\n🪙 Silber: 112.600€\n📕 Sparbuch: 34.900€\n📱 Nokia: 23.800€\n📈 S&P 500: 116.800€\n🎯 NVIDIA: 2,55 Mio.€" },
   { name: "💎 Vermögen Alter", color: "rot_weiss", text: "Vermögen in 🇩🇪\nTop 10% deiner Altersklasse?\n18 J.: 25.000€\n25 J.: 80.000€\n30 J.: 160.000€\n35 J.: 260.000€\n40 J.: 350.000€\n50 J.: 480.000€\nTop 10% 💸: 550.000€" },
-  { name: "🏠 Immobilien Rendite", color: "gelb_schwarz", text: "Mietrendite nach Stadt\nWo lohnt sich der Kauf?\n📍 München: 2,8%\n📍 Berlin: 3,2%\n📍 Hamburg: 3,5%\n📍 Frankfurt: 3,7%\n📍 Düsseldorf: 4,1%\n📍 Leipzig: 5,2%\n📍 Dortmund: 5,8%" },
-  { name: "💶 Steuer-Tricks", color: "gruen_rot", text: "5 Steuer-Tricks\nDie 90% der Deutschen nicht kennen\n1️⃣ Arbeitszimmer: bis 1.260€\n2️⃣ Homeoffice-Pauschale: 1.260€\n3️⃣ Handwerkerkosten: 1.200€\n4️⃣ Fahrtkosten: 0,30€/km\n5️⃣ Doppelte Haushaltsführung: 1.000€/Monat" },
-  { name: "📉 Fehler Geldanlage", color: "rot_weiss", text: "5 teure Fehler\nDie dich arm halten\n❌ Nur Sparbuch: Inflation frisst Rendite\n❌ Market Timing: Statistisch unmöglich\n❌ Keine Diversifikation: Klumpenrisiko\n❌ Zu hohe Gebühren: -2% p.a. Verlust\n❌ Kein Notgroschen: Panikverkäufe" },
-  { name: "🔑 Erste Immobilie", color: "blau_gelb", text: "Deine erste Immobilie\nSchritt für Schritt\n1️⃣ Eigenkapital: Min. 20%\n2️⃣ Bonität: Schufa prüfen\n3️⃣ Finanzierung: Tilgung min. 2%\n4️⃣ Lage: A/B-Standort wählen\n5️⃣ Rendite: Min. 4% Brutto\n6️⃣ Rücklage: 3 Monatsmieten" },
-  { name: "🏠 Nebenkosten Kauf", color: "orange_schwarz", text: "Nebenkosten beim Immobilienkauf\nDas vergessen die meisten\n📋 Grunderwerbsteuer: 3,5-6,5%\n📋 Notar: ~1,5%\n📋 Grundbuch: ~0,5%\n📋 Makler: 3-6%\n📋 Sanierung: 10-20%\n💰 Gesamt: bis 35% Nebenkosten!" },
+  { name: "🏠 Cash-Flow Rechner", color: "gelb_schwarz", text: "Cash-Flow einer Immobilie\nBeispiel: 3-Zimmer Leipzig\n💰 Kaltmiete: 750€\n➖ Hausgeld: -180€\n➖ Rücklage: -50€\n➖ Zinsen: -320€\n➖ Tilgung: -150€\n➖ Steuervorteil: +80€\n✅ Cash-Flow: +130€/Monat" },
   { name: "📱 Abo-Check", color: "lila_gelb", text: "Deine monatlichen Abos\nWas du wirklich brauchst\n📺 Netflix: 13,99€\n🎵 Spotify: 10,99€\n☁️ iCloud: 2,99€\n📰 News App: 9,99€\n💪 Gym: 29,99€\n📱 Handy: 39,99€\n💸 Gesamt: 107,94€/Monat" },
   { name: "🇩🇪 Steuerlast", color: "rot_weiss", text: "So viel zahlst du wirklich\nSteuerlast in Deutschland\n💰 Brutto: 5.000€\n📉 Lohnsteuer: -850€\n📉 Soli: -47€\n📉 KV: -375€\n📉 RV: -465€\n📉 AV: -65€\n📉 PV: -85€\n✅ Netto: 3.113€" },
-  { name: "🏠 Cash-Flow Rechner", color: "gelb_schwarz", text: "Cash-Flow einer Immobilie\nBeispiel: 3-Zimmer Leipzig\n💰 Kaltmiete: 750€\n➖ Hausgeld: -180€\n➖ Rücklage: -50€\n➖ Zinsen: -320€\n➖ Tilgung: -150€\n➖ Steuervorteil: +80€\n✅ Cash-Flow: +130€/Monat" },
 ];
 
 // ━━━ AI SYSTEM PROMPT ━━━
-const AI_SYSTEM_PROMPT = `Du bist ein Assistent für einen Social-Media Reel/Story-Editor für ein deutsches Finanz-Investmentunternehmen (NeoCore Assets).
-
-Der Nutzer gibt dir einen freien Prompt auf Deutsch, und du generierst daraus strukturierten Text in einem spezifischen Format.
+const AI_SYSTEM_PROMPT = `Du bist ein Assistent für einen Social-Media Reel/Story-Editor für ein deutsches Finanz-Investmentunternehmen (NeoCore Assets). Der Nutzer gibt dir einen freien Prompt auf Deutsch, und du generierst daraus strukturierten Text in einem spezifischen Format.
 
 FORMAT REGELN:
 - Erste Zeile: Titel/Headline (kurz, prägnant, max 35 Zeichen)
@@ -127,156 +104,112 @@ WICHTIG:
 - Themen: Finanzen, Steuern, Immobilien, Renten, Investments, Karriere etc.
 - Antworte NUR mit dem formatierten Text, KEIN Erklärungstext davor oder danach`;
 
-// ━━━ CONTEXT + REDUCER ━━━
+// ━━━ DEFAULT CREATIVE STATE ━━━
+function createCreative(overrides = {}) {
+  const ex = overrides.text ? null : pickRandom(EXAMPLES);
+  return {
+    id: uid(),
+    inputText: overrides.text || ex?.text || EXAMPLES[0].text,
+    colorPreset: overrides.color || ex?.color || "blau_gelb",
+    bgImage: overrides.bgImage || null,
+    bgIsVideo: overrides.bgIsVideo || false,
+    overlay: { enabled: true, hex: "#0B1222", opacity: 55 },
+    textScale: 100,
+    textOffsetY: 0,
+    animateType: "none",
+    colorOverrides: {},
+    showBoxBackgrounds: true,
+    selected: true,
+    ...overrides,
+  };
+}
+
+// ━━━ CONTEXT ━━━
 const Ctx = createContext(null);
 const useEditor = () => useContext(Ctx);
 
-const startExample = EXAMPLES[0];
-const initialState = {
-  inputText: startExample.text,
-  parsed: parseInput(startExample.text),
-  colorPreset: startExample.color,
-  bgImage: null,
-  overlay: { enabled: true, hex: "#0B1222", opacity: 55 },
-  zoom: 0.38,
-  textScale: 100,
-  textOffsetY: 0,
-  animateType: "none", // none, fade, drift, blur
-  colorOverrides: {},
-  showBoxBackgrounds: true,
-  queue: [],
-  queueIndex: 0,
-  bgIsVideo: false,
+// ━━━ SHARED STYLE TOKENS ━━━
+const COLORS = {
+  bg: "#0B0D12",
+  panel: "#0D0F14",
+  card: "rgba(255,255,255,0.025)",
+  border: "rgba(255,255,255,0.06)",
+  borderActive: "#6C63FF",
+  accent: "#6C63FF",
+  accentBg: "rgba(108,99,255,0.12)",
+  accentText: "#A9A3FF",
+  text: "#fff",
+  textDim: "rgba(255,255,255,0.4)",
+  textMuted: "rgba(255,255,255,0.2)",
+  danger: "#E50914",
+  success: "#22C55E",
 };
 
-function reducer(s, a) {
-  switch (a.type) {
-    case "SET_TEXT": return { ...s, inputText: a.text, parsed: parseInput(a.text) };
-    case "SET_COLOR": return { ...s, colorPreset: a.key };
-    case "SET_BG": {
-      if (a.url && !s.bgImage) {
-        const ex = pickRandom(EXAMPLES);
-        return { ...s, bgImage: a.url, bgIsVideo: a.isVideo || false, inputText: ex.text, parsed: parseInput(ex.text), colorPreset: ex.color, colorOverrides: {} };
-      }
-      return { ...s, bgImage: a.url, bgIsVideo: a.isVideo || false };
-    }
-    case "SET_BG_KEEP": return { ...s, bgImage: a.url, bgIsVideo: false };
-    case "SET_OVERLAY": return { ...s, overlay: { ...s.overlay, ...a.p } };
-    case "SET_ZOOM": return { ...s, zoom: a.value };
-    case "SET_TEXT_SCALE": return { ...s, textScale: a.value };
-    case "SET_TEXT_OFFSET_Y": return { ...s, textOffsetY: a.value };
-    case "SET_ANIMATE": return { ...s, animateType: a.value };
-    case "SET_SHOW_BOX_BACKGROUNDS": return { ...s, showBoxBackgrounds: a.value };
-    case "SET_COLOR_OVERRIDE": return { ...s, colorOverrides: { ...s.colorOverrides, [a.index]: a.colors } };
-    case "CLEAR_COLOR_OVERRIDE": {
-      const copy = { ...s.colorOverrides };
-      delete copy[a.index];
-      return { ...s, colorOverrides: copy };
-    }
-    case "LOAD_EXAMPLE": return { ...s, inputText: a.text, parsed: parseInput(a.text), colorPreset: a.color || s.colorPreset, colorOverrides: {}, queue: [], queueIndex: 0 };
-    case "RANDOM": {
-      const ex = pickRandom(EXAMPLES);
-      return { ...s, inputText: ex.text, parsed: parseInput(ex.text), colorPreset: ex.color, colorOverrides: {}, queue: [], queueIndex: 0 };
-    }
-    case "IMPORT_QUEUE": {
-      const parts = a.text.split("---").map(p => p.trim()).filter(Boolean);
-      if (parts.length === 0) return s;
-      return { ...s, queue: parts, queueIndex: 0, inputText: parts[0], parsed: parseInput(parts[0]), colorOverrides: {} };
-    }
-    case "LOAD_QUEUE_ITEM": {
-      if (a.index < 0 || a.index >= s.queue.length) return s;
-      return { ...s, queueIndex: a.index, inputText: s.queue[a.index], parsed: parseInput(s.queue[a.index]), colorOverrides: {} };
-    }
-    case "NEXT_QUEUE_ITEM": {
-      const nextIdx = s.queueIndex + 1;
-      if (nextIdx >= s.queue.length) return s;
-      return { ...s, queueIndex: nextIdx, inputText: s.queue[nextIdx], parsed: parseInput(s.queue[nextIdx]), colorOverrides: {} };
-    }
-    case "PREV_QUEUE_ITEM": {
-      const prevIdx = s.queueIndex - 1;
-      if (prevIdx < 0) return s;
-      return { ...s, queueIndex: prevIdx, inputText: s.queue[prevIdx], parsed: parseInput(s.queue[prevIdx]), colorOverrides: {} };
-    }
-    default: return s;
-  }
-}
+const sec = { marginBottom: "10px", padding: "10px", background: COLORS.card, borderRadius: "8px", border: `1px solid ${COLORS.border}` };
+const lab = { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "10px", color: COLORS.textDim, marginBottom: "4px", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.5px" };
+const rng = { width: "100%", accentColor: COLORS.accent, cursor: "pointer", height: "3px" };
+const abtn = { padding: "5px 10px", fontSize: "10px", background: COLORS.accentBg, border: `1px solid rgba(108,99,255,0.2)`, borderRadius: "5px", color: COLORS.accentText, cursor: "pointer", fontFamily: "monospace" };
 
-// ━━━ LABEL BOX ━━━
-const LB = ({ children, bg, color, size = 28, bold = true, style = {}, animateProps = {} }) => {
-  const { delay = 0, type = "none" } = animateProps;
-  const { state } = useEditor();
-
-  let animString = "none";
-  if (type === "fade") animString = `subtleFade 0.7s cubic-bezier(0.25, 1, 0.5, 1) forwards ${delay}s`;
-  if (type === "drift") animString = `subtleDrift 0.8s cubic-bezier(0.22, 1, 0.36, 1) forwards ${delay}s`;
-  if (type === "blur") animString = `subtleBlur 0.9s cubic-bezier(0.33, 1, 0.68, 1) forwards ${delay}s`;
-
-  return (
-    <div style={{
-      display: "inline-block", padding: "10px 22px", borderRadius: "12px",
-      backgroundColor: state.showBoxBackgrounds ? bg : "transparent", color, fontSize: `${size}px`,
-      fontWeight: bold ? 800 : 600, fontFamily: "'SF Pro Display',system-ui,sans-serif",
-      lineHeight: 1.3, textAlign: "center", whiteSpace: "pre-line",
-      boxShadow: state.showBoxBackgrounds ? "0 3px 12px rgba(0,0,0,0.2)" : "none",
-      opacity: type !== "none" ? 0 : 1,
-      animation: animString,
-      ...style,
-    }}>{children}</div>
-  );
-};
-
+// ━━━ LABEL BOX COMPONENT ━━━
+const LB = ({ children, bg, color, size = 28, bold = true, style = {}, showBoxBg = true }) => (
+  <div style={{
+    display: "inline-block", padding: "10px 22px", borderRadius: "12px",
+    backgroundColor: showBoxBg ? bg : "transparent", color,
+    fontSize: `${size}px`, fontWeight: bold ? 800 : 600,
+    fontFamily: "'SF Pro Display',system-ui,sans-serif", lineHeight: 1.3,
+    textAlign: "center", whiteSpace: "pre-line",
+    boxShadow: showBoxBg ? "0 3px 12px rgba(0,0,0,0.2)" : "none",
+    ...style,
+  }}>{children}</div>
+);
 
 // ━━━ RENDERERS ━━━
-function RenderCompare() {
-  const { state } = useEditor();
-  const { parsed, colorPreset, animateType, colorOverrides } = state;
+function RenderCompare({ creative }) {
+  const { colorPreset, colorOverrides, showBoxBackgrounds } = creative;
+  const parsed = parseInput(creative.inputText);
   const c = COLOR_PRESETS[colorPreset];
-  let delay = 0.2; // slight initial pause
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%", padding: "50px 30px", gap: "14px", boxSizing: "border-box" }}>
-      <LB bg={c.titleBg} color={c.title} size={44} style={{ marginBottom: "10px" }} animateProps={{ type: animateType, delay: delay }}>{parsed.title}</LB>
+      <LB bg={c.titleBg} color={c.title} size={44} showBoxBg={showBoxBackgrounds} style={{ marginBottom: "10px" }}>{parsed.title}</LB>
       <div style={{ display: "flex", width: "92%", justifyContent: "space-between", alignItems: "center" }}>
-        <LB bg={c.colA} color={c.colAText} size={30} animateProps={{ type: animateType, delay: delay += 0.15 }}>{parsed.colALabel}</LB>
-        <LB bg="rgba(255,255,255,0.9)" color="#000" size={24} bold={false} animateProps={{ type: animateType, delay: delay }}>vs.</LB>
-        <LB bg={c.colB} color={c.colBText} size={30} animateProps={{ type: animateType, delay: delay }}>{parsed.colBLabel}</LB>
+        <LB bg={c.colA} color={c.colAText} size={30} showBoxBg={showBoxBackgrounds}>{parsed.colALabel}</LB>
+        <LB bg="rgba(255,255,255,0.9)" color="#000" size={24} bold={false} showBoxBg={showBoxBackgrounds}>vs.</LB>
+        <LB bg={c.colB} color={c.colBText} size={30} showBoxBg={showBoxBackgrounds}>{parsed.colBLabel}</LB>
       </div>
       <div style={{ height: "20px" }} />
       {parsed.rows.map((r, i) => {
         const o = colorOverrides[i];
-        delay += 0.6; // Deutlich sichtbarer Abstand pro Reihe
         return (
           <div key={i} style={{ display: "flex", width: "96%", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
-            <LB bg={o?.bgA || c.colA} color={o?.textA || c.colAText} size={28} style={{ flex: "1 1 28%", minWidth: 0 }} animateProps={{ type: animateType, delay }}>{r.left}</LB>
-            <LB bg="rgba(255,255,255,0.92)" color="#000" size={24} style={{ flex: "1 1 36%", minWidth: 0 }} animateProps={{ type: animateType, delay: delay + 0.1 }}>{r.center}</LB>
-            <LB bg={o?.bgB || c.colB} color={o?.textB || c.colBText} size={28} style={{ flex: "1 1 28%", minWidth: 0 }} animateProps={{ type: animateType, delay: delay + 0.2 }}>{r.right}</LB>
+            <LB bg={o?.bgA || c.colA} color={o?.textA || c.colAText} size={28} showBoxBg={showBoxBackgrounds} style={{ flex: "1 1 28%", minWidth: 0 }}>{r.left}</LB>
+            <LB bg="rgba(255,255,255,0.92)" color="#000" size={24} showBoxBg={showBoxBackgrounds} style={{ flex: "1 1 36%", minWidth: 0 }}>{r.center}</LB>
+            <LB bg={o?.bgB || c.colB} color={o?.textB || c.colBText} size={28} showBoxBg={showBoxBackgrounds} style={{ flex: "1 1 28%", minWidth: 0 }}>{r.right}</LB>
           </div>
         );
       })}
       <div style={{ marginTop: "20px" }}>
-        <LB bg="rgba(255,255,255,0.85)" color="#000" size={20} bold={false} animateProps={{ type: animateType, delay: delay += 0.6 }}>Infos in der Caption ⬇️</LB>
+        <LB bg="rgba(255,255,255,0.85)" color="#000" size={20} bold={false} showBoxBg={showBoxBackgrounds}>Infos in der Caption ⬇️</LB>
       </div>
     </div>
   );
 }
 
-function RenderList() {
-  const { state } = useEditor();
-  const { parsed, colorPreset, animateType, colorOverrides } = state;
+function RenderList({ creative }) {
+  const { colorPreset, colorOverrides, showBoxBackgrounds } = creative;
+  const parsed = parseInput(creative.inputText);
   const c = COLOR_PRESETS[colorPreset];
-  let delay = 0.2; // slight initial pause
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%", padding: "50px 30px", gap: "14px", boxSizing: "border-box" }}>
-      <LB bg={c.titleBg} color={c.title} size={48} style={{ marginBottom: "4px" }} animateProps={{ type: animateType, delay: delay }}>{parsed.title}</LB>
-      {parsed.subtitle && <LB bg={c.colA} color={c.colAText} size={28} style={{ marginBottom: "20px" }} animateProps={{ type: animateType, delay: delay += 0.15 }}>{parsed.subtitle}</LB>}
+      <LB bg={c.titleBg} color={c.title} size={48} showBoxBg={showBoxBackgrounds} style={{ marginBottom: "4px" }}>{parsed.title}</LB>
+      {parsed.subtitle && <LB bg={c.colA} color={c.colAText} size={28} showBoxBg={showBoxBackgrounds} style={{ marginBottom: "20px" }}>{parsed.subtitle}</LB>}
       {!parsed.subtitle && <div style={{ height: "20px" }} />}
       {parsed.rows.map((r, i) => {
         const isLast = i === parsed.rows.length - 1;
         const o = colorOverrides[i];
-        delay += 0.6; // Deutlich sichtbar Reihe für Reihe
         return (
           <div key={i} style={{ display: "flex", width: "90%", justifyContent: "space-between", alignItems: "center", gap: "12px" }}>
-            <LB bg={o?.bgA || c.colA} color={o?.textA || c.colAText} size={32} style={{ flex: "1 1 50%", textAlign: "left" }} animateProps={{ type: animateType, delay }}>{r.label}</LB>
-            {r.value && <LB bg={o?.bgB || (isLast ? c.colB : "#FFFFFF")} color={o?.textB || (isLast ? c.colBText : "#000")} size={32} style={{ flex: "1 1 45%", textAlign: "right" }} animateProps={{ type: animateType, delay: delay + 0.2 }}>{r.value}</LB>}
+            <LB bg={o?.bgA || c.colA} color={o?.textA || c.colAText} size={32} showBoxBg={showBoxBackgrounds} style={{ flex: "1 1 50%", textAlign: "left" }}>{r.label}</LB>
+            {r.value && <LB bg={o?.bgB || (isLast ? c.colB : "#FFFFFF")} color={o?.textB || (isLast ? c.colBText : "#000")} size={32} showBoxBg={showBoxBackgrounds} style={{ flex: "1 1 45%", textAlign: "right" }}>{r.value}</LB>}
           </div>
         );
       })}
@@ -284,732 +217,870 @@ function RenderList() {
   );
 }
 
-function AutoRenderer() {
-  const { state } = useEditor();
-  if (state.parsed.type === "compare") return <RenderCompare />;
-  return <RenderList />;
+function AutoRenderer({ creative }) {
+  const parsed = parseInput(creative.inputText);
+  if (parsed.type === "compare") return <RenderCompare creative={creative} />;
+  return <RenderList creative={creative} />;
 }
 
-// ━━━ CANVAS ━━━
-function Canvas({ exportRef }) {
-  const { state, dispatch } = useEditor();
-  const fileRef = useRef(null);
-
-  // Create a ref for the video to handle playback
-  const videoRef = useRef(null);
-
+// ━━━ MINI CANVAS (for thumbnails & export) ━━━
+function MiniCanvas({ creative, scale = 0.12, exportRef, onClick, isActive }) {
   return (
-    <div ref={exportRef} style={{
-      position: "relative", width: "1080px", height: "1920px",
-      background: state.bgImage ? "transparent" : "#000", overflow: "hidden",
-      transformOrigin: "top left", transform: `scale(${state.zoom})`,
-    }}>
-      {state.bgImage && (
-        state.bgIsVideo ? (
-          <video
-            ref={videoRef}
-            src={state.bgImage}
-            crossOrigin="anonymous"
-            autoPlay
-            loop
-            muted
-            playsInline
-            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", zIndex: 0 }}
-          />
+    <div
+      onClick={onClick}
+      style={{
+        position: "relative",
+        cursor: "pointer",
+        border: isActive ? `3px solid ${COLORS.accent}` : `2px solid ${COLORS.border}`,
+        borderRadius: "10px",
+        overflow: "hidden",
+        flexShrink: 0,
+        transition: "border-color 0.2s, transform 0.2s, box-shadow 0.2s",
+        transform: isActive ? "scale(1.02)" : "scale(1)",
+        boxShadow: isActive ? `0 0 20px rgba(108,99,255,0.3)` : "0 4px 20px rgba(0,0,0,0.3)",
+      }}
+    >
+      <div
+        ref={exportRef}
+        style={{
+          width: "1080px", height: "1920px",
+          background: creative.bgImage ? "transparent" : "#000",
+          overflow: "hidden",
+          transformOrigin: "top left",
+          transform: `scale(${scale})`,
+        }}
+      >
+        {creative.bgImage && (
+          creative.bgIsVideo ? (
+            <video src={creative.bgImage} crossOrigin="anonymous" autoPlay loop muted playsInline
+              style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", zIndex: 0 }} />
+          ) : (
+            <img src={creative.bgImage} crossOrigin="anonymous"
+              style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", zIndex: 0 }} alt="" />
+          )
+        )}
+        {creative.overlay.enabled && (
+          <div style={{ position: "absolute", inset: 0, zIndex: 1, pointerEvents: "none",
+            backgroundColor: hexToRgba(creative.overlay.hex, creative.overlay.opacity) }} />
+        )}
+        <div style={{
+          position: "relative", zIndex: 2, width: "100%", height: "100%",
+          display: "flex", flexDirection: "column", justifyContent: "center",
+          transform: `scale(${creative.textScale / 100}) translateY(${creative.textOffsetY}px)`,
+          transformOrigin: "center center",
+        }}>
+          <AutoRenderer creative={creative} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ━━━ FULL CANVAS (for main editing view) ━━━
+function FullCanvas({ creative, zoom = 0.38, exportRef }) {
+  return (
+    <div
+      ref={exportRef}
+      style={{
+        position: "relative",
+        width: "1080px", height: "1920px",
+        background: creative.bgImage ? "transparent" : "#000",
+        overflow: "hidden",
+        transformOrigin: "top left",
+        transform: `scale(${zoom})`,
+      }}
+    >
+      {creative.bgImage && (
+        creative.bgIsVideo ? (
+          <video src={creative.bgImage} crossOrigin="anonymous" autoPlay loop muted playsInline
+            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", zIndex: 0 }} />
         ) : (
-          <img src={state.bgImage} crossOrigin="anonymous" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", zIndex: 0 }} alt="" />
+          <img src={creative.bgImage} crossOrigin="anonymous"
+            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", zIndex: 0 }} alt="" />
         )
       )}
-      <input ref={fileRef} type="file" accept="image/*,video/mp4" onChange={(e) => {
-        const f = e.target.files?.[0]; if (!f) return;
-        const isVideo = f.type.startsWith('video/');
-        const r = new FileReader();
-        r.onload = (ev) => dispatch({ type: "SET_BG", url: ev.target.result, isVideo });
-        r.readAsDataURL(f);
-      }} style={{ display: "none" }} />
-      {state.overlay.enabled && (
-        <div style={{ position: "absolute", inset: 0, zIndex: 1, pointerEvents: "none", backgroundColor: hexToRgba(state.overlay.hex, state.overlay.opacity) }} />
+      {creative.overlay.enabled && (
+        <div style={{ position: "absolute", inset: 0, zIndex: 1, pointerEvents: "none",
+          backgroundColor: hexToRgba(creative.overlay.hex, creative.overlay.opacity) }} />
       )}
-      <div style={{ position: "relative", zIndex: 2, width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", transform: `scale(${state.textScale / 100}) translateY(${state.textOffsetY}px)`, transformOrigin: "center center" }}>
-        <AutoRenderer />
+      <div style={{
+        position: "relative", zIndex: 2, width: "100%", height: "100%",
+        display: "flex", flexDirection: "column", justifyContent: "center",
+        transform: `scale(${creative.textScale / 100}) translateY(${creative.textOffsetY}px)`,
+        transformOrigin: "center center",
+      }}>
+        <AutoRenderer creative={creative} />
       </div>
     </div>
   );
 }
 
-// ━━━ VIEWPORT ━━━
-function Viewport({ exportRef }) {
-  const { state } = useEditor();
-  return (
-    <div style={{ flex: 1, display: "flex", justifyContent: "center", alignItems: "center", overflow: "auto", padding: "24px", background: "radial-gradient(ellipse at center, #1a1e2e 0%, #0f1119 70%)" }}>
-      <div style={{ width: 1080 * state.zoom, height: 1920 * state.zoom, flexShrink: 0, boxShadow: "0 16px 100px rgba(0,0,0,0.6)", borderRadius: "16px", overflow: "hidden" }}>
-        <Canvas exportRef={exportRef} />
-      </div>
-    </div>
-  );
-}
-
-// ━━━ SHARED STYLE TOKENS ━━━
-const sec = { marginBottom: "10px", padding: "10px", background: "rgba(255,255,255,0.025)", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.05)" };
-const lab = { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "10px", color: "rgba(255,255,255,0.4)", marginBottom: "4px", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.5px" };
-const rng = { width: "100%", accentColor: "#6C63FF", cursor: "pointer", height: "3px" };
-const csw = { width: "26px", height: "22px", border: "none", borderRadius: "4px", cursor: "pointer", background: "transparent", padding: 0 };
-const abtn = { padding: "5px 10px", fontSize: "10px", background: "rgba(108,99,255,0.1)", border: "1px solid rgba(108,99,255,0.2)", borderRadius: "5px", color: "#A9A3FF", cursor: "pointer", fontFamily: "monospace" };
-
-// ━━━ AI PROMPT SECTION ━━━
-function AiPromptSection() {
-  const { dispatch } = useEditor();
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STEP 1: IMPORT PANEL
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function ImportPanel({ creatives, setCreatives, setActiveId, setStep }) {
+  const fileRef = useRef(null);
+  const [bulkText, setBulkText] = useState("");
+  const [showBulk, setShowBulk] = useState(false);
   const [apiKey, setApiKey] = useState(() => localStorage.getItem("openai_key") || "");
   const [prompt, setPrompt] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiCount, setAiCount] = useState(5);
   const [showKey, setShowKey] = useState(false);
-  const [keyVisible, setKeyVisible] = useState(false);
 
-  useEffect(() => {
-    if (apiKey) localStorage.setItem("openai_key", apiKey);
-  }, [apiKey]);
+  useEffect(() => { if (apiKey) localStorage.setItem("openai_key", apiKey); }, [apiKey]);
 
-  const handleGenerate = useCallback(async () => {
-    if (!apiKey.trim()) { setError("Bitte OpenAI API-Key eingeben"); return; }
-    if (!prompt.trim()) { setError("Bitte Prompt eingeben"); return; }
-    setLoading(true);
-    setError("");
+  // Add single from template
+  const addFromTemplate = (ex) => {
+    const c = createCreative({ text: ex.text, color: ex.color });
+    setCreatives(prev => [...prev, c]);
+    setActiveId(c.id);
+  };
+
+  // Add multiple from bulk text
+  const addBulk = () => {
+    const parts = bulkText.split("---").map(p => p.trim()).filter(Boolean);
+    const newCreatives = parts.map(text => createCreative({ text }));
+    setCreatives(prev => [...prev, ...newCreatives]);
+    if (newCreatives.length > 0) setActiveId(newCreatives[0].id);
+    setBulkText("");
+    setShowBulk(false);
+  };
+
+  // Add from files
+  const handleFiles = (e) => {
+    const files = Array.from(e.target.files);
+    files.forEach(f => {
+      const isVideo = f.type.startsWith('video/');
+      const r = new FileReader();
+      r.onload = (ev) => {
+        const c = createCreative({ bgImage: ev.target.result, bgIsVideo: isVideo });
+        setCreatives(prev => [...prev, c]);
+        setActiveId(c.id);
+      };
+      r.readAsDataURL(f);
+    });
+  };
+
+  // AI Bulk Generate
+  const handleAiGenerate = async () => {
+    if (!apiKey.trim() || !prompt.trim()) return;
+    setAiLoading(true);
     try {
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey.trim()}` },
         body: JSON.stringify({
-          model: "gpt-4o-mini",
-          temperature: 0.7,
-          max_tokens: 400,
+          model: "gpt-4o-mini", temperature: 0.8, max_tokens: 2000,
           messages: [
-            { role: "system", content: AI_SYSTEM_PROMPT },
+            { role: "system", content: AI_SYSTEM_PROMPT + `\n\nWICHTIG: Generiere genau ${aiCount} verschiedene Posts. Trenne sie mit --- (drei Bindestriche auf einer eigenen Zeile). Jeder Post hat sein eigenes Format.` },
             { role: "user", content: prompt },
           ],
         }),
       });
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        throw new Error(d?.error?.message || `API Fehler ${res.status}`);
-      }
+      if (!res.ok) throw new Error("API Fehler");
       const data = await res.json();
       const generated = data.choices?.[0]?.message?.content?.trim();
-      if (!generated) throw new Error("Leere Antwort von OpenAI");
-      dispatch({ type: "SET_TEXT", text: generated });
-      setPrompt("");
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [apiKey, prompt, dispatch]);
+      if (generated) {
+        const parts = generated.split("---").map(p => p.trim()).filter(Boolean);
+        const colorKeys = Object.keys(COLOR_PRESETS);
+        const newCreatives = parts.map(text => createCreative({ text, color: pickRandom(colorKeys) }));
+        setCreatives(prev => [...prev, ...newCreatives]);
+        if (newCreatives.length > 0) setActiveId(newCreatives[0].id);
+      }
+    } catch (e) { alert("KI-Fehler: " + e.message); }
+    finally { setAiLoading(false); }
+  };
+
+  // Add empty
+  const addEmpty = () => {
+    const c = createCreative({ text: "Neuer Titel\nUntertitel\nLabel: Wert" });
+    setCreatives(prev => [...prev, c]);
+    setActiveId(c.id);
+  };
 
   return (
-    <div style={{ ...sec, border: "1px solid rgba(108,99,255,0.2)", background: "rgba(108,99,255,0.04)" }}>
-      {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-        <div style={{ fontSize: "11px", fontWeight: 700, color: "#A9A3FF", fontFamily: "system-ui", display: "flex", alignItems: "center", gap: "5px" }}>
-          <span>✨</span> KI-Prompt
+    <div style={{ flex: 1, overflow: "auto", padding: "24px" }}>
+      <div style={{ maxWidth: "900px", margin: "0 auto" }}>
+        {/* Header */}
+        <div style={{ marginBottom: "24px" }}>
+          <h2 style={{ color: "#fff", fontSize: "22px", fontWeight: 700, margin: 0, fontFamily: "system-ui" }}>
+            📥 Creatives importieren
+          </h2>
+          <p style={{ color: COLORS.textDim, fontSize: "13px", marginTop: "6px", fontFamily: "system-ui" }}>
+            Füge Hintergrundbilder/Videos hinzu, nutze Vorlagen, oder generiere Content mit KI
+          </p>
         </div>
-        <button onClick={() => setShowKey(p => !p)} style={{ ...abtn, fontSize: "9px", padding: "2px 7px" }}>
-          {showKey ? "Key verbergen" : "🔑 API Key"}
-        </button>
-      </div>
 
-      {/* API Key input */}
-      {showKey && (
-        <div style={{ marginBottom: "8px" }}>
-          <div style={{ ...lab, marginBottom: "3px" }}><span>OpenAI API Key</span></div>
-          <div style={{ display: "flex", gap: "4px" }}>
-            <input
-              type={keyVisible ? "text" : "password"}
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="sk-..."
-              style={{
-                flex: 1, padding: "6px 8px", fontSize: "11px", fontFamily: "monospace",
-                background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
-                borderRadius: "5px", color: "#fff", outline: "none",
-              }}
-            />
-            <button onClick={() => setKeyVisible(p => !p)} style={{ ...abtn, padding: "4px 7px", fontSize: "11px" }}>{keyVisible ? "🙈" : "👁"}</button>
+        {/* Counter */}
+        <div style={{ ...sec, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px" }}>
+          <span style={{ color: COLORS.accentText, fontSize: "14px", fontWeight: 700, fontFamily: "system-ui" }}>
+            {creatives.length} Creative{creatives.length !== 1 ? "s" : ""} geladen
+          </span>
+          {creatives.length > 0 && (
+            <button onClick={() => setStep("edit")} style={{
+              padding: "8px 20px", fontSize: "12px", fontWeight: 700,
+              background: `linear-gradient(135deg, ${COLORS.accent}, #4F46E5)`,
+              border: "none", borderRadius: "8px", color: "#fff", cursor: "pointer", fontFamily: "system-ui",
+            }}>
+              Weiter zum Bearbeiten ▶
+            </button>
+          )}
+        </div>
+
+        {/* Upload Area */}
+        <div style={{ ...sec, padding: "20px", textAlign: "center", border: `2px dashed ${COLORS.border}` }}>
+          <input ref={fileRef} type="file" accept="image/*,video/mp4" multiple onChange={handleFiles} style={{ display: "none" }} />
+          <div style={{ fontSize: "32px", marginBottom: "8px" }}>📤</div>
+          <div style={{ color: COLORS.textDim, fontSize: "13px", marginBottom: "12px", fontFamily: "system-ui" }}>
+            Bilder & Videos hochladen (mehrere gleichzeitig möglich)
           </div>
-          <div style={{ fontSize: "8px", color: "rgba(255,255,255,0.15)", marginTop: "3px", fontFamily: "monospace" }}>
-            Wird nur lokal im Browser gespeichert (localStorage)
+          <button onClick={() => fileRef.current?.click()} style={{
+            ...abtn, padding: "10px 24px", fontSize: "13px", fontWeight: 600,
+          }}>Dateien auswählen</button>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
+          {/* Templates */}
+          <div style={{ ...sec, padding: "14px" }}>
+            <div style={{ ...lab, marginBottom: "8px" }}><span>📂 Vorlagen</span></div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", maxHeight: "200px", overflowY: "auto" }}>
+              {EXAMPLES.map((ex, i) => (
+                <button key={i} onClick={() => addFromTemplate(ex)} style={{
+                  padding: "5px 8px", fontSize: "11px", fontFamily: "system-ui",
+                  background: COLORS.card, border: `1px solid ${COLORS.border}`,
+                  borderRadius: "5px", color: COLORS.textDim, cursor: "pointer",
+                }}>{ex.name}</button>
+              ))}
+            </div>
+            <button onClick={addEmpty} style={{ ...abtn, width: "100%", marginTop: "8px" }}>+ Leeres Creative</button>
+          </div>
+
+          {/* KI Generator */}
+          <div style={{ ...sec, padding: "14px", border: `1px solid rgba(108,99,255,0.2)`, background: "rgba(108,99,255,0.03)" }}>
+            <div style={{ ...lab, marginBottom: "8px" }}><span>✨ KI Bulk-Generator</span></div>
+            {!showKey ? (
+              <button onClick={() => setShowKey(true)} style={{ ...abtn, width: "100%", marginBottom: "8px" }}>🔑 API Key eingeben</button>
+            ) : (
+              <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..."
+                style={{ width: "100%", padding: "6px 8px", fontSize: "11px", fontFamily: "monospace",
+                  background: "rgba(255,255,255,0.04)", border: `1px solid ${COLORS.border}`,
+                  borderRadius: "5px", color: "#fff", outline: "none", boxSizing: "border-box", marginBottom: "8px" }} />
+            )}
+            <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)}
+              placeholder={`z.B. "Erstelle Posts über verschiedene Steuer-Spar-Tipps, Immobilien-Renditen und ETF-Vergleiche"`}
+              style={{ width: "100%", minHeight: "70px", padding: "8px", background: "rgba(255,255,255,0.04)",
+                border: `1px solid rgba(108,99,255,0.15)`, borderRadius: "6px", color: "#fff",
+                fontSize: "12px", fontFamily: "system-ui", outline: "none", resize: "vertical", boxSizing: "border-box" }} />
+            <div style={{ display: "flex", gap: "8px", marginTop: "8px", alignItems: "center" }}>
+              <span style={{ color: COLORS.textDim, fontSize: "11px", fontFamily: "system-ui" }}>Anzahl:</span>
+              <select value={aiCount} onChange={(e) => setAiCount(Number(e.target.value))}
+                style={{ padding: "4px 8px", fontSize: "11px", background: "rgba(255,255,255,0.05)", color: "#fff",
+                  border: `1px solid ${COLORS.border}`, borderRadius: "4px", outline: "none" }}>
+                {[3, 5, 8, 10, 15].map(n => <option key={n} value={n}>{n} Posts</option>)}
+              </select>
+              <button onClick={handleAiGenerate} disabled={aiLoading} style={{
+                ...abtn, flex: 1, fontWeight: 600,
+                background: aiLoading ? "rgba(108,99,255,0.1)" : "linear-gradient(135deg, rgba(108,99,255,0.8), rgba(79,70,229,0.9))",
+                color: "#fff", opacity: aiLoading ? 0.7 : 1,
+              }}>
+                {aiLoading ? "⟳ Generiere..." : `✨ ${aiCount}x generieren`}
+              </button>
+            </div>
           </div>
         </div>
-      )}
 
-      {/* Prompt textarea */}
-      <textarea
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleGenerate(); }}
-        placeholder={`z.B. „Vergleiche Bitcoin vs Gold über die letzten 10 Jahre" oder „Liste der 6 besten ETFs für Anfänger"`}
-        style={{
-          width: "100%", minHeight: "80px", padding: "8px",
-          background: "rgba(255,255,255,0.04)", border: "1px solid rgba(108,99,255,0.15)",
-          borderRadius: "6px", color: "#fff", fontSize: "12px",
-          fontFamily: "system-ui", lineHeight: 1.5, outline: "none",
-          resize: "vertical", boxSizing: "border-box",
-        }}
-      />
-
-      {/* Quick prompts */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "3px", marginTop: "5px", marginBottom: "6px" }}>
-        {[
-          "Vergleiche Ethereum vs Bitcoin 2025",
-          "Top 5 Steuer-Tricks für Selbständige",
-          "GmbH vs Einzelunternehmen Vergleich",
-          "Mietrendite-Vergleich Deutschlands Städte",
-          "Nettolohn bei 4.000€ Brutto aufschlüsseln",
-          "ETF Sparplan Ergebnis nach 20 Jahren",
-        ].map((q, i) => (
-          <button key={i} onClick={() => setPrompt(q)} style={{
-            padding: "3px 7px", fontSize: "9px",
-            background: prompt === q ? "rgba(108,99,255,0.15)" : "rgba(255,255,255,0.03)",
-            border: `1px solid ${prompt === q ? "#6C63FF" : "rgba(255,255,255,0.06)"}`,
-            borderRadius: "4px", color: "rgba(255,255,255,0.35)",
-            cursor: "pointer", fontFamily: "system-ui",
-          }}>{q}</button>
-        ))}
-      </div>
-
-      {/* Error */}
-      {error && (
-        <div style={{ fontSize: "10px", color: "#FF6B6B", fontFamily: "monospace", marginBottom: "6px", padding: "5px 8px", background: "rgba(229,9,20,0.08)", borderRadius: "5px", border: "1px solid rgba(229,9,20,0.15)" }}>
-          ⚠ {error}
+        {/* Bulk Text Import */}
+        <div style={sec}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ ...lab.fontSize, color: COLORS.textDim, fontSize: "10px", fontFamily: "monospace", textTransform: "uppercase" }}>📝 Text Bulk-Import</span>
+            <button onClick={() => setShowBulk(p => !p)} style={{ ...abtn, fontSize: "9px", padding: "3px 8px" }}>
+              {showBulk ? "Schließen" : "Öffnen"}
+            </button>
+          </div>
+          {showBulk && (
+            <div style={{ marginTop: "8px" }}>
+              <textarea value={bulkText} onChange={(e) => setBulkText(e.target.value)}
+                placeholder="Mehrere Posts einfügen, getrennt durch ---\n\nPost 1\n...\n---\nPost 2\n..."
+                style={{ width: "100%", minHeight: "120px", padding: "10px", background: "rgba(255,255,255,0.04)",
+                  border: `1px solid ${COLORS.border}`, borderRadius: "6px", color: "#fff",
+                  fontSize: "11px", fontFamily: "monospace", outline: "none", resize: "vertical", boxSizing: "border-box" }} />
+              <button onClick={addBulk} style={{ ...abtn, width: "100%", marginTop: "6px", fontWeight: 600 }}>
+                Alle importieren
+              </button>
+            </div>
+          )}
         </div>
-      )}
 
-      {/* Generate button */}
-      <button onClick={handleGenerate} disabled={loading} style={{
-        width: "100%", padding: "9px",
-        background: loading ? "rgba(108,99,255,0.2)" : "linear-gradient(135deg, rgba(108,99,255,0.8), rgba(79,70,229,0.9))",
-        color: "#fff", border: "1px solid rgba(108,99,255,0.3)",
-        borderRadius: "7px", fontSize: "12px", fontWeight: 600,
-        cursor: loading ? "wait" : "pointer", fontFamily: "system-ui",
-        opacity: loading ? 0.7 : 1, display: "flex", alignItems: "center",
-        justifyContent: "center", gap: "6px",
-      }}>
-        {loading
-          ? <><span style={{ display: "inline-block", animation: "spin 1s linear infinite" }}>⟳</span> KI generiert…</>
-          : <>✨ Generieren <span style={{ fontSize: "9px", opacity: 0.6 }}>⌘↵</span></>}
-      </button>
-
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+        {/* Preview of loaded creatives */}
+        {creatives.length > 0 && (
+          <div style={sec}>
+            <div style={{ ...lab, marginBottom: "10px" }}><span>Geladene Creatives</span></div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+              {creatives.map((c, i) => (
+                <div key={c.id} style={{
+                  width: "80px", height: "142px", borderRadius: "6px", overflow: "hidden",
+                  border: `1px solid ${COLORS.border}`, position: "relative", flexShrink: 0,
+                }}>
+                  <div style={{ transform: "scale(0.074)", transformOrigin: "top left", width: "1080px", height: "1920px",
+                    background: c.bgImage ? "transparent" : "#000", position: "relative" }}>
+                    {c.bgImage && !c.bgIsVideo && <img src={c.bgImage} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} alt="" />}
+                    {c.overlay.enabled && <div style={{ position: "absolute", inset: 0, backgroundColor: hexToRgba(c.overlay.hex, c.overlay.opacity) }} />}
+                    <div style={{ position: "relative", zIndex: 2, width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "center",
+                      transform: `scale(${c.textScale / 100})`, transformOrigin: "center center" }}>
+                      <AutoRenderer creative={c} />
+                    </div>
+                  </div>
+                  <div style={{ position: "absolute", top: "3px", left: "3px", background: "rgba(0,0,0,0.7)",
+                    color: "#fff", fontSize: "9px", padding: "1px 4px", borderRadius: "3px", fontWeight: 700 }}>{i + 1}</div>
+                  <button onClick={() => setCreatives(prev => prev.filter(x => x.id !== c.id))} style={{
+                    position: "absolute", top: "2px", right: "2px", background: "rgba(229,9,20,0.8)",
+                    color: "#fff", border: "none", borderRadius: "50%", width: "16px", height: "16px",
+                    fontSize: "9px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>✕</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-// ━━━ PANEL ━━━
-function Panel({ exportRef }) {
-  const { state, dispatch } = useEditor();
-  const [exporting, setExporting] = useState(false);
-  const [exportProgress, setExportProgress] = useState("");
-  const [templateFilter, setTemplateFilter] = useState("all");
-  const [importText, setImportText] = useState("");
-  const [showImport, setShowImport] = useState(false);
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STEP 2: EDIT PANEL — Horizontal Filmstrip Bulk Editor
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function EditPanel({ creatives, setCreatives, activeId, setActiveId, setStep }) {
+  const active = creatives.find(c => c.id === activeId) || creatives[0];
+  const activeIndex = creatives.findIndex(c => c.id === activeId);
   const fileRef = useRef(null);
-  const ffmpegRef = useRef(new FFmpeg());
+  const exportRef = useRef(null);
+  const filmstripRef = useRef(null);
 
-  const handleExport = useCallback(async (andNext = false) => {
-    const el = exportRef.current;
-    if (!el || exporting) return;
-    setExporting(true);
-    await new Promise(r => setTimeout(r, 50));
-    try {
-      if (!window.html2canvas) {
-        const s = document.createElement("script");
-        s.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
-        document.head.appendChild(s);
-        await new Promise((r) => { s.onload = r; s.onerror = () => r(); });
+  const updateActive = (updates) => {
+    setCreatives(prev => prev.map(c => c.id === active.id ? { ...c, ...updates } : c));
+  };
+
+  // Apply current settings to ALL creatives
+  const applyToAll = (field) => {
+    const val = active[field];
+    setCreatives(prev => prev.map(c => ({ ...c, [field]: val })));
+  };
+
+  // Navigate with keyboard
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT") return;
+      if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+        e.preventDefault();
+        const idx = creatives.findIndex(c => c.id === activeId);
+        if (idx < creatives.length - 1) setActiveId(creatives[idx + 1].id);
       }
-      if (!window.html2canvas) { alert("Export failed"); return; }
-
-      const prevTransform = el.style.transform;
-      el.style.transform = "scale(1)";
-
-      const canvas = await window.html2canvas(el, {
-        scale: 1,
-        useCORS: true,
-        allowTaint: true,
-        backgroundColor: null
-      });
-
-      el.style.transform = prevTransform;
-
-      const link = document.createElement("a");
-      link.download = `reel-${Date.now()}.png`;
-      link.href = canvas.toDataURL("image/png");
-      link.click();
-    } finally {
-      setExporting(false);
-      if (andNext && state.queue.length > 0 && state.queueIndex < state.queue.length - 1) {
-        dispatch({ type: "NEXT_QUEUE_ITEM" });
+      if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const idx = creatives.findIndex(c => c.id === activeId);
+        if (idx > 0) setActiveId(creatives[idx - 1].id);
       }
-    }
-  }, [exportRef, exporting, state.queue, state.queueIndex, dispatch]);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [activeId, creatives, setActiveId]);
 
-  const handleVideoExport = useCallback(async () => {
-    const el = exportRef.current;
-    if (!el || exporting) return;
-    setExporting(true);
-    setExportProgress("Lade Engine...");
+  if (!active) return <div style={{ color: "#fff", padding: "40px", textAlign: "center" }}>Keine Creatives geladen. Gehe zurück zum Import.</div>;
 
-    try {
-      const ffmpeg = ffmpegRef.current;
-      if (!ffmpeg.loaded) {
-        ffmpeg.on("progress", ({ progress }) => {
-          setExportProgress(`Lade Engine: ${Math.round(progress * 100)}%`);
-        });
-        await ffmpeg.load();
-      }
-
-      setExportProgress("Erzeuge Overlay...");
-
-      if (!window.html2canvas) {
-        const s = document.createElement("script");
-        s.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
-        document.head.appendChild(s);
-        await new Promise((r) => { s.onload = r; s.onerror = () => r(); });
-      }
-
-      // 1. Capture the transparent overlay
-      const prevTransform = el.style.transform;
-      el.style.transform = "scale(1)";
-
-      // Temporarily hide the video element so we only capture the text overlay
-      const videoEl = el.querySelector("video");
-      const imgEl = el.querySelector("img");
-      let originalDisplayVid = "";
-      let originalDisplayImg = "";
-
-      if (videoEl) { originalDisplayVid = videoEl.style.display; videoEl.style.display = "none"; }
-      if (imgEl && state.bgIsVideo) { originalDisplayImg = imgEl.style.display; imgEl.style.display = "none"; }
-
-      const overlayCanvas = await window.html2canvas(el, {
-        scale: 1,
-        useCORS: true,
-        allowTaint: true,
-        backgroundColor: null
-      });
-
-      if (videoEl) videoEl.style.display = originalDisplayVid;
-      if (imgEl && state.bgIsVideo) imgEl.style.display = originalDisplayImg;
-      el.style.transform = prevTransform;
-
-      // Convert overlay canvas to bytes
-      const overlayBlob = await new Promise(r => overlayCanvas.toBlob(r, 'image/png'));
-      const overlayFile = await fetchFile(overlayBlob);
-      await ffmpeg.writeFile('overlay.png', overlayFile);
-
-      setExportProgress("Rendere Video...");
-      let durationStr = "-t 6"; // Default duration 6 seconds if no background video
-
-      if (state.bgImage && state.bgIsVideo) {
-        // We have a background video!
-        const bgFile = await fetchFile(state.bgImage);
-        await ffmpeg.writeFile('bg.mp4', bgFile);
-
-        ffmpeg.on("progress", ({ progress }) => {
-          setExportProgress(`Rendere Video: ${Math.round(progress * 100)}%`);
-        });
-
-        // Loop the video if shorter than 6 seconds, and overlay the PNG scale to fit 1080x1920
-        await ffmpeg.exec([
-          '-stream_loop', '-1', // loop background
-          '-i', 'bg.mp4',
-          '-i', 'overlay.png',
-          '-filter_complex', '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[bg];[bg][1:v]overlay=0:0[out]',
-          '-map', '[out]',
-          '-c:v', 'libx264',
-          '-preset', 'ultrafast',
-          '-t', '6', // hardcode 6 seconds for social media shorts loop
-          '-pix_fmt', 'yuv420p',
-          'output.mp4'
-        ]);
-      } else {
-        // Just the overlay on a black background
-        ffmpeg.on("progress", ({ progress }) => {
-          setExportProgress(`Rendere Video: ${Math.round(progress * 100)}%`);
-        });
-
-        await ffmpeg.exec([
-          '-f', 'lavfi',
-          '-i', 'color=c=black:s=1080x1920:d=6',
-          '-i', 'overlay.png',
-          '-filter_complex', '[0:v][1:v]overlay=0:0[out]',
-          '-map', '[out]',
-          '-c:v', 'libx264',
-          '-preset', 'ultrafast',
-          '-t', '6',
-          '-pix_fmt', 'yuv420p',
-          'output.mp4'
-        ]);
-      }
-
-      setExportProgress("Download...");
-      const data = await ffmpeg.readFile('output.mp4');
-      const blob = new Blob([data.buffer], { type: 'video/mp4' });
-      const url = URL.createObjectURL(blob);
-
-      // Cleanup FFmpeg file system
-      try {
-        await ffmpeg.deleteFile('overlay.png');
-        if (state.bgIsVideo) await ffmpeg.deleteFile('bg.mp4');
-        await ffmpeg.deleteFile('output.mp4');
-      } catch (e) { }
-
-      const link = document.createElement("a");
-      link.download = `reel-${Date.now()}.mp4`;
-      link.href = url;
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
-
-    } catch (err) {
-      console.error("FFmpeg render failed:", err);
-      alert("Video Export fehlgeschlagen. Starte eventuell den lokalen Server neu.");
-    } finally {
-      setExporting(false);
-      setExportProgress("");
-    }
-  }, [exportRef, exporting, state.bgImage, state.bgIsVideo]);
-
-  const filtered = templateFilter === "compare"
-    ? EXAMPLES.filter(e => parseInput(e.text).type === "compare")
-    : templateFilter === "list"
-      ? EXAMPLES.filter(e => parseInput(e.text).type === "list")
-      : EXAMPLES;
+  const parsed = parseInput(active.inputText);
 
   return (
-    <div style={{
-      width: "320px", height: "100vh", overflowY: "auto",
-      background: "#0D0F14", borderRight: "1px solid rgba(255,255,255,0.05)",
-      padding: "14px 12px", display: "flex", flexDirection: "column",
-      fontFamily: "system-ui, sans-serif",
-    }}>
-      {/* Header */}
-      <div style={{ fontSize: "15px", fontWeight: 700, color: "#fff", marginBottom: "14px", letterSpacing: "-0.3px" }}>⚡ Reel Producer</div>
-
-      {/* ✨ AI PROMPT — top position */}
-      <AiPromptSection />
-
-      {/* QUEUE / BATCH IMPORT */}
-      <div style={sec}>
-        <div style={{ ...lab, marginBottom: "6px" }}>
-          <span>📚 Massen-Import (Warteschlange)</span>
-          <button onClick={() => setShowImport(p => !p)} style={{ ...abtn, fontSize: "9px", padding: "2px 8px" }}>
-            {showImport ? "Schließen" : "Importieren"}
-          </button>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+      {/* Top Bar: Navigation + Counter */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "10px 16px", borderBottom: `1px solid ${COLORS.border}`,
+        background: "rgba(13,15,20,0.95)", backdropFilter: "blur(10px)", zIndex: 10,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <button onClick={() => { const idx = creatives.findIndex(c => c.id === activeId); if (idx > 0) setActiveId(creatives[idx - 1].id); }}
+            disabled={activeIndex === 0}
+            style={{ ...abtn, fontSize: "16px", padding: "4px 12px", opacity: activeIndex === 0 ? 0.3 : 1 }}>◀</button>
+          <span style={{ color: COLORS.accentText, fontSize: "14px", fontWeight: 700, fontFamily: "system-ui" }}>
+            Creative {activeIndex + 1} / {creatives.length}
+          </span>
+          <button onClick={() => { const idx = creatives.findIndex(c => c.id === activeId); if (idx < creatives.length - 1) setActiveId(creatives[idx + 1].id); }}
+            disabled={activeIndex === creatives.length - 1}
+            style={{ ...abtn, fontSize: "16px", padding: "4px 12px", opacity: activeIndex === creatives.length - 1 ? 0.3 : 1 }}>▶</button>
         </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <span style={{ color: COLORS.textMuted, fontSize: "10px", fontFamily: "monospace" }}>← → Pfeiltasten zum Navigieren</span>
+          <button onClick={() => setStep("export")} style={{
+            padding: "8px 20px", fontSize: "12px", fontWeight: 700,
+            background: `linear-gradient(135deg, ${COLORS.success}, #16a34a)`,
+            border: "none", borderRadius: "8px", color: "#fff", cursor: "pointer", fontFamily: "system-ui",
+          }}>Weiter zum Export ▶</button>
+        </div>
+      </div>
 
-        {showImport && (
-          <div style={{ marginBottom: "10px" }}>
-            <textarea
-              value={importText}
-              onChange={(e) => setImportText(e.target.value)}
-              placeholder="Füge mehrere Posts hier ein, getrennt durch ---\n\nPost 1\n...\n---\nPost 2\n..."
-              style={{
-                width: "100%", minHeight: "80px", padding: "8px",
-                background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
-                borderRadius: "6px", color: "#fff", fontSize: "11px",
-                fontFamily: "monospace", outline: "none", resize: "vertical", boxSizing: "border-box", marginBottom: "6px"
-              }}
-            />
-            <button onClick={() => {
-              dispatch({ type: "IMPORT_QUEUE", text: importText });
-              setShowImport(false);
-              setImportText("");
-            }} style={{ ...abtn, width: "100%", background: "rgba(108,99,255,0.15)" }}>In Warteschlange laden</button>
-          </div>
-        )}
-
-        {state.queue.length > 0 && (
-          <div style={{ background: "rgba(255,255,255,0.02)", padding: "8px", borderRadius: "6px", border: "1px solid rgba(255,255,255,0.04)" }}>
-            <div style={{ fontSize: "10px", color: "#A9A3FF", fontWeight: 700, marginBottom: "8px", textAlign: "center" }}>
-              Aktive Queue: Post {state.queueIndex + 1} von {state.queue.length}
+      {/* Main Area: Sidebar + Preview + Filmstrip */}
+      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+        {/* Left Sidebar: Edit Controls */}
+        <div style={{
+          width: "300px", flexShrink: 0, overflowY: "auto", padding: "12px",
+          borderRight: `1px solid ${COLORS.border}`, background: COLORS.panel,
+        }}>
+          {/* Text Input */}
+          <div style={sec}>
+            <div style={{ ...lab, marginBottom: "6px" }}><span>📝 Text</span></div>
+            <textarea value={active.inputText}
+              onChange={(e) => updateActive({ inputText: e.target.value })}
+              style={{ width: "100%", minHeight: "140px", padding: "8px", background: "rgba(255,255,255,0.04)",
+                border: `1px solid ${COLORS.border}`, borderRadius: "6px", color: "#fff",
+                fontSize: "11px", fontFamily: "'SF Mono',monospace", lineHeight: 1.6,
+                outline: "none", resize: "vertical", boxSizing: "border-box" }} />
+            <div style={{ fontSize: "9px", color: COLORS.textMuted, marginTop: "4px", fontFamily: "monospace" }}>
+              {parsed.type === "compare" ? `⚔️ Vergleich (${parsed.rows.length} Zeilen)` : `📋 Liste (${parsed.rows.length} Einträge)`}
             </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", maxHeight: "150px", overflowY: "auto" }}>
-              {state.queue.map((q, i) => (
-                <button key={i} onClick={() => dispatch({ type: "LOAD_QUEUE_ITEM", index: i })} style={{
-                  padding: "4px", minWidth: "24px", textAlign: "center", fontSize: "10px", fontWeight: "bold",
-                  background: state.queueIndex === i ? "#6C63FF" : "rgba(255,255,255,0.05)",
-                  color: state.queueIndex === i ? "#fff" : "rgba(255,255,255,0.4)",
-                  border: "none", borderRadius: "4px", cursor: "pointer", fontFamily: "system-ui"
+          </div>
+
+          {/* Color Presets */}
+          <div style={sec}>
+            <div style={{ ...lab, marginBottom: "6px" }}>
+              <span>🎨 Farben</span>
+              <button onClick={() => applyToAll("colorPreset")} style={{ ...abtn, fontSize: "8px", padding: "2px 6px" }}>Auf alle</button>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "3px" }}>
+              {Object.entries(COLOR_PRESETS).map(([k, v]) => (
+                <button key={k} onClick={() => updateActive({ colorPreset: k })} style={{
+                  padding: "3px 6px", fontSize: "9px",
+                  background: active.colorPreset === k ? COLORS.accentBg : "transparent",
+                  border: `1px solid ${active.colorPreset === k ? COLORS.accent : COLORS.border}`,
+                  borderRadius: "4px", cursor: "pointer", fontFamily: "system-ui",
+                  color: active.colorPreset === k ? COLORS.accentText : COLORS.textDim,
+                  display: "flex", alignItems: "center", gap: "3px",
                 }}>
-                  {i + 1}
+                  <div style={{ display: "flex", gap: "1px" }}>
+                    <div style={{ width: "7px", height: "7px", borderRadius: "2px", background: v.colA }} />
+                    <div style={{ width: "7px", height: "7px", borderRadius: "2px", background: v.colB }} />
+                  </div>
+                  {v.name}
                 </button>
               ))}
             </div>
-            <div style={{ display: "flex", gap: "6px", marginTop: "8px" }}>
-              <button disabled={state.queueIndex === 0} onClick={() => dispatch({ type: "PREV_QUEUE_ITEM" })} style={{ ...abtn, flex: 1, opacity: state.queueIndex === 0 ? 0.3 : 1 }}>◀ Zurück</button>
-              <button disabled={state.queueIndex === state.queue.length - 1} onClick={() => dispatch({ type: "NEXT_QUEUE_ITEM" })} style={{ ...abtn, flex: 1, opacity: state.queueIndex === state.queue.length - 1 ? 0.3 : 1 }}>Vor ▶</button>
+          </div>
+
+          {/* Text Scale + Position */}
+          <div style={sec}>
+            <div style={{ ...lab }}><span>📐 Textgröße</span><span>{active.textScale}%</span></div>
+            <input type="range" min="40" max="150" value={active.textScale}
+              onChange={(e) => updateActive({ textScale: Number(e.target.value) })} style={rng} />
+            <div style={{ ...lab, marginTop: "8px" }}><span>↕️ Y-Position</span><span>{active.textOffsetY}px</span></div>
+            <input type="range" min={-400} max={400} value={active.textOffsetY}
+              onChange={(e) => updateActive({ textOffsetY: Number(e.target.value) })} style={rng} />
+            <div style={{ display: "flex", gap: "4px", marginTop: "6px" }}>
+              <button onClick={() => applyToAll("textScale")} style={{ ...abtn, fontSize: "8px", padding: "2px 6px", flex: 1 }}>Größe auf alle</button>
+              <button onClick={() => applyToAll("textOffsetY")} style={{ ...abtn, fontSize: "8px", padding: "2px 6px", flex: 1 }}>Position auf alle</button>
             </div>
           </div>
-        )}
-      </div>
 
-      {/* MANUAL TEXT INPUT */}
-      <div style={sec}>
-        <div style={{ ...lab, marginBottom: "6px" }}>
-          <span>📝 Manuell bearbeiten</span>
-          <button onClick={() => dispatch({ type: "RANDOM" })} style={{ ...abtn, fontSize: "9px", padding: "2px 8px" }}>🎲</button>
-        </div>
-        <textarea
-          value={state.inputText}
-          onChange={(e) => {
-            dispatch({ type: "SET_TEXT", text: e.target.value });
-            // Update queue item if in queue
-            if (state.queue.length > 0) {
-              // We would ideally save it live into the queue, but that's complex without messing up cursor position if queue updates text directly.
-              // We'll leave the direct edit local to `inputText` and not sync back automatically to avoid text jumping.
-            }
-          }}
-          placeholder={"Titel\nA vs B\nLabel: WertA | WertB"}
-          style={{
-            width: "100%", minHeight: "140px", padding: "10px",
-            background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: "8px", color: "#fff", fontSize: "12px",
-            fontFamily: "'SF Mono',monospace", lineHeight: 1.6,
-            outline: "none", resize: "vertical", boxSizing: "border-box",
-          }}
-        />
-        <div style={{ fontSize: "9px", color: "rgba(255,255,255,0.2)", marginTop: "4px", fontFamily: "monospace", lineHeight: 1.5 }}>
-          Erkannt: <span style={{ color: state.parsed.type === "compare" ? "#A9A3FF" : "#22C55E" }}>
-            {state.parsed.type === "compare"
-              ? `⚔️ Vergleich (${state.parsed.rows.length} Zeilen)`
-              : `📋 Liste (${state.parsed.rows.length} Einträge)`}
-          </span>
-        </div>
-      </div>
+          {/* Background */}
+          <div style={sec}>
+            <div style={{ ...lab, marginBottom: "6px" }}>
+              <span>🖼️ Hintergrund</span>
+              <button onClick={() => applyToAll("bgImage")} style={{ ...abtn, fontSize: "8px", padding: "2px 6px" }}>Auf alle</button>
+            </div>
+            <input ref={fileRef} type="file" accept="image/*,video/mp4" onChange={(e) => {
+              const f = e.target.files?.[0]; if (!f) return;
+              const isVideo = f.type.startsWith('video/');
+              const r = new FileReader();
+              r.onload = (ev) => updateActive({ bgImage: ev.target.result, bgIsVideo: isVideo });
+              r.readAsDataURL(f);
+            }} style={{ display: "none" }} />
+            <div style={{ display: "flex", gap: "4px" }}>
+              <button onClick={() => fileRef.current?.click()} style={abtn}>
+                {active.bgImage ? "Ändern" : "📤 Upload"}
+              </button>
+              {active.bgImage && <button onClick={() => updateActive({ bgImage: null, bgIsVideo: false })}
+                style={{ ...abtn, color: "#FF6B6B", borderColor: "rgba(229,9,20,0.2)" }}>✕</button>}
+            </div>
+          </div>
 
-      {/* TEMPLATES */}
-      <div style={sec}>
-        <div style={{ ...lab, marginBottom: "6px" }}><span>📂 Vorlagen ({filtered.length})</span></div>
-        <div style={{ display: "flex", gap: "3px", marginBottom: "6px" }}>
-          {[["all", "Alle"], ["compare", "⚔️"], ["list", "📋"]].map(([k, n]) => (
-            <button key={k} onClick={() => setTemplateFilter(k)} style={{
-              padding: "3px 8px", fontSize: "9px",
-              background: templateFilter === k ? "rgba(108,99,255,0.15)" : "transparent",
-              border: `1px solid ${templateFilter === k ? "#6C63FF" : "rgba(255,255,255,0.05)"}`,
-              borderRadius: "4px", color: templateFilter === k ? "#A9A3FF" : "rgba(255,255,255,0.3)",
-              cursor: "pointer", fontFamily: "system-ui",
-            }}>{n}</button>
-          ))}
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "3px", maxHeight: "120px", overflowY: "auto" }}>
-          {filtered.map((ex, i) => (
-            <button key={i} onClick={() => dispatch({ type: "LOAD_EXAMPLE", text: ex.text, color: ex.color })} style={{
-              padding: "4px 7px", fontSize: "10px",
-              background: state.inputText === ex.text ? "rgba(108,99,255,0.12)" : "rgba(255,255,255,0.02)",
-              border: `1px solid ${state.inputText === ex.text ? "#6C63FF" : "rgba(255,255,255,0.05)"}`,
-              borderRadius: "5px", color: state.inputText === ex.text ? "#A9A3FF" : "rgba(255,255,255,0.35)",
-              cursor: "pointer", fontFamily: "system-ui",
-            }}>{ex.name}</button>
-          ))}
-        </div>
-      </div>
-
-      {/* COLOR PRESETS */}
-      <div style={sec}>
-        <div style={lab}><span>🎨 Farben</span></div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
-          {Object.entries(COLOR_PRESETS).map(([k, v]) => (
-            <button key={k} onClick={() => dispatch({ type: "SET_COLOR", key: k })} style={{
-              padding: "4px 8px", fontSize: "10px",
-              background: state.colorPreset === k ? "rgba(108,99,255,0.15)" : "transparent",
-              border: `1px solid ${state.colorPreset === k ? "#6C63FF" : "rgba(255,255,255,0.05)"}`,
-              borderRadius: "6px", cursor: "pointer", fontFamily: "system-ui",
-              color: state.colorPreset === k ? "#A9A3FF" : "rgba(255,255,255,0.3)",
-              display: "flex", alignItems: "center", gap: "5px",
-            }}>
-              <div style={{ display: "flex", gap: "1px" }}>
-                <div style={{ width: "9px", height: "9px", borderRadius: "2px", background: v.colA }} />
-                <div style={{ width: "9px", height: "9px", borderRadius: "2px", background: v.colB }} />
+          {/* Overlay */}
+          <div style={sec}>
+            <div style={{ ...lab, marginBottom: "6px" }}>
+              <span>Overlay</span>
+              <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                <button onClick={() => { applyToAll("overlay"); }} style={{ ...abtn, fontSize: "8px", padding: "2px 6px" }}>Auf alle</button>
+                <input type="checkbox" checked={active.overlay.enabled}
+                  onChange={() => updateActive({ overlay: { ...active.overlay, enabled: !active.overlay.enabled } })}
+                  style={{ accentColor: COLORS.accent }} />
               </div>
-              {v.name}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* TEXT SIZE + POSITION */}
-      <div style={sec}>
-        <div style={lab}><span>📐 Textgröße</span><span>{state.textScale}%</span></div>
-        <input type="range" min="40" max="150" value={state.textScale} onChange={(e) => dispatch({ type: "SET_TEXT_SCALE", value: Number(e.target.value) })} style={rng} />
-
-        <div style={{ ...lab, marginTop: "8px" }}><span>↕️ Y-Position</span><span>{state.textOffsetY}px</span></div>
-        <input type="range" min={-400} max={400} value={state.textOffsetY} onChange={(e) => dispatch({ type: "SET_TEXT_OFFSET_Y", value: Number(e.target.value) })} style={rng} />
-
-        <div style={{ ...lab, marginTop: "12px", marginBottom: "4px" }}>
-          <span>🟩 Box-Hintergründe</span>
-          <input type="checkbox" checked={state.showBoxBackgrounds} onChange={() => dispatch({ type: "SET_SHOW_BOX_BACKGROUNDS", value: !state.showBoxBackgrounds })} style={{ accentColor: "#6C63FF" }} />
-        </div>
-
-        <button onClick={() => { dispatch({ type: "SET_TEXT_SCALE", value: 100 }); dispatch({ type: "SET_TEXT_OFFSET_Y", value: 0 }); }} style={{ ...abtn, fontSize: "9px", padding: "3px 8px", marginTop: "6px" }}>Reset</button>
-      </div>
-
-      {/* BACKGROUND */}
-      <div style={sec}>
-        <div style={lab}><span>🖼️ Hintergrund</span></div>
-        <input ref={fileRef} type="file" accept="image/*,video/mp4" onChange={(e) => {
-          const f = e.target.files?.[0]; if (!f) return;
-          const isVideo = f.type.startsWith('video/');
-          const r = new FileReader();
-          r.onload = (ev) => dispatch({ type: "SET_BG", url: ev.target.result, isVideo });
-          r.readAsDataURL(f);
-        }} style={{ display: "none" }} />
-        <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
-          <button onClick={() => fileRef.current?.click()} style={abtn}>{state.bgImage ? "Ändern" : "📤 Bild/Video hochladen"}</button>
-          {state.bgImage && <>
-            <button onClick={() => dispatch({ type: "SET_BG_KEEP", url: null })} style={{ ...abtn, color: "#FF6B6B", borderColor: "rgba(229,9,20,0.2)" }}>✕</button>
-            <button onClick={() => dispatch({ type: "RANDOM" })} style={{ ...abtn, fontSize: "9px" }}>🎲 Neu</button>
-          </>}
-        </div>
-        {state.bgImage && (
-          <div style={{ marginTop: "6px", borderRadius: "6px", overflow: "hidden", border: "1px solid rgba(255,255,255,0.05)" }}>
-            {state.bgIsVideo ? (
-              <video src={state.bgImage} style={{ width: "100%", height: "55px", objectFit: "cover", display: "block" }} muted loop autoPlay playsInline />
-            ) : (
-              <img src={state.bgImage} style={{ width: "100%", height: "55px", objectFit: "cover", display: "block" }} alt="" />
-            )}
+            </div>
+            {active.overlay.enabled && <>
+              <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                <input type="color" value={active.overlay.hex}
+                  onChange={(e) => updateActive({ overlay: { ...active.overlay, hex: e.target.value } })}
+                  style={{ width: "26px", height: "22px", border: "none", borderRadius: "4px", cursor: "pointer", background: "transparent", padding: 0 }} />
+                <span style={{ fontSize: "10px", color: COLORS.textMuted, fontFamily: "monospace" }}>
+                  {active.overlay.hex} · {active.overlay.opacity}%
+                </span>
+              </div>
+              <input type="range" min="0" max="100" value={active.overlay.opacity}
+                onChange={(e) => updateActive({ overlay: { ...active.overlay, opacity: Number(e.target.value) } })}
+                style={{ ...rng, marginTop: "4px" }} />
+            </>}
           </div>
-        )}
-      </div>
 
-      {/* OVERLAY */}
-      <div style={sec}>
-        <div style={{ ...lab, marginBottom: "6px" }}>
-          <span>Overlay</span>
-          <input type="checkbox" checked={state.overlay.enabled} onChange={() => dispatch({ type: "SET_OVERLAY", p: { enabled: !state.overlay.enabled } })} style={{ accentColor: "#6C63FF" }} />
-        </div>
-        {state.overlay.enabled && <>
-          <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-            <input type="color" value={state.overlay.hex} onChange={(e) => dispatch({ type: "SET_OVERLAY", p: { hex: e.target.value } })} style={csw} />
-            <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.2)", fontFamily: "monospace" }}>{state.overlay.hex} · {state.overlay.opacity}%</span>
+          {/* Box Backgrounds */}
+          <div style={sec}>
+            <div style={{ ...lab }}>
+              <span>🟩 Box-Hintergründe</span>
+              <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                <button onClick={() => applyToAll("showBoxBackgrounds")} style={{ ...abtn, fontSize: "8px", padding: "2px 6px" }}>Auf alle</button>
+                <input type="checkbox" checked={active.showBoxBackgrounds}
+                  onChange={() => updateActive({ showBoxBackgrounds: !active.showBoxBackgrounds })}
+                  style={{ accentColor: COLORS.accent }} />
+              </div>
+            </div>
           </div>
-          <input type="range" min="0" max="100" value={state.overlay.opacity} onChange={(e) => dispatch({ type: "SET_OVERLAY", p: { opacity: Number(e.target.value) } })} style={{ ...rng, marginTop: "4px" }} />
-        </>}
-      </div>
-
-      {/* ZOOM & ANIMATION OPTIONS */}
-      <div style={sec}>
-        <div style={lab}><span>🔍 Zoom</span><span>{Math.round(state.zoom * 100)}%</span></div>
-        <input type="range" min="18" max="60" value={Math.round(state.zoom * 100)} onChange={(e) => dispatch({ type: "SET_ZOOM", value: Number(e.target.value) / 100 })} style={rng} />
-
-        <div style={{ ...lab, marginTop: "12px", marginBottom: "6px" }}>
-          <span>🎬 Hochwertige Animationen</span>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-          <select
-            value={state.animate}
-            onChange={(e) => {
-              dispatch({ type: "SET_ANIMATE", value: "none" }); // Reset first
-              setTimeout(() => dispatch({ type: "SET_ANIMATE", value: e.target.value }), 50);
-            }}
-            style={{
-              width: "100%", padding: "6px 8px", fontSize: "11px", fontFamily: "system-ui",
-              background: "rgba(255,255,255,0.05)", color: "#fff", border: "1px solid rgba(255,255,255,0.1)",
-              borderRadius: "5px", outline: "none", cursor: "pointer", appearance: "none"
-            }}
-          >
-            <option value="none">Keine (Statisch)</option>
-            <option value="fade">🌬️ Subtle Fade (Sanftes Einblenden)</option>
-            <option value="drift">🍃 Smooth Drift (Leichtes Schweben)</option>
-            <option value="blur">🌫️ Soft Blur (Kino-Fokus)</option>
-          </select>
         </div>
 
-        {state.animate !== "none" && (
-          <button onClick={() => {
-            const current = state.animate;
-            dispatch({ type: "SET_ANIMATE", value: "none" });
-            setTimeout(() => dispatch({ type: "SET_ANIMATE", value: current }), 50);
-          }} style={{ ...abtn, width: "100%", marginTop: "8px", background: "rgba(108,99,255,0.15)" }}>
-            ▶️ Animation neu starten
-          </button>
-        )}
-      </div>
-
-      <div style={{ flex: 1 }} />
-
-      {/* EXPORT OPTIONS */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "10px" }}>
-
-        {/* Video Recording Warning/Button */}
-        <button onClick={handleVideoExport} disabled={exporting} style={{
-          width: "100%", padding: "12px 10px",
-          background: exporting ? "#333" : "linear-gradient(135deg, rgba(229,9,20,0.8), rgba(200,0,0,0.9))",
-          color: "#fff", border: "1px solid rgba(229,9,20,0.5)", borderRadius: "10px", fontSize: "12px",
-          fontWeight: 700, cursor: exporting ? "wait" : "pointer", fontFamily: "system-ui",
-          transition: "background 0.2s"
+        {/* Center: Main Preview */}
+        <div style={{
+          flex: 1, display: "flex", flexDirection: "column",
+          background: "radial-gradient(ellipse at center, #1a1e2e 0%, #0f1119 70%)",
+          overflow: "hidden",
         }}>
-          {exporting ? (exportProgress || "Rendere Video…") : "🎥 Als Video (MP4) rendern"}
-        </button>
+          {/* Main Preview */}
+          <div style={{ flex: 1, display: "flex", justifyContent: "center", alignItems: "center", overflow: "auto", padding: "16px" }}>
+            <div style={{
+              width: 1080 * 0.38, height: 1920 * 0.38, flexShrink: 0,
+              boxShadow: "0 16px 100px rgba(0,0,0,0.6)", borderRadius: "16px", overflow: "hidden",
+            }}>
+              <FullCanvas creative={active} zoom={0.38} exportRef={exportRef} />
+            </div>
+          </div>
 
-        {/* PNG Exports */}
-        <div style={{ display: "flex", gap: "6px" }}>
-          <button onClick={() => handleExport(false)} disabled={exporting} style={{
-            flex: 1, padding: "14px 10px",
-            background: exporting ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.08)",
-            color: "#fff", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", fontSize: "14px",
-            fontWeight: 700, cursor: exporting ? "wait" : "pointer", fontFamily: "system-ui",
-            opacity: exporting ? 0.6 : 1, transition: "background 0.2s"
+          {/* Bottom Filmstrip */}
+          <div ref={filmstripRef} style={{
+            display: "flex", gap: "8px", padding: "12px 16px",
+            overflowX: "auto", overflowY: "hidden",
+            borderTop: `1px solid ${COLORS.border}`,
+            background: "rgba(13,15,20,0.95)",
+            minHeight: "160px",
           }}>
-            {exporting ? "…" : "↓ PNG"}
-          </button>
-
-          <button onClick={() => handleExport(true)} disabled={exporting || (state.queue.length > 0 && state.queueIndex === state.queue.length - 1)} style={{
-            flex: 2, padding: "14px 10px",
-            background: exporting ? "#333" : "linear-gradient(135deg, #6C63FF, #4F46E5)",
-            color: "#fff", border: "none", borderRadius: "10px", fontSize: "13px",
-            fontWeight: 700, cursor: exporting ? "wait" : "pointer", fontFamily: "system-ui",
-            opacity: exporting ? 0.6 : 1, transition: "opacity 0.2s", display: "flex", alignItems: "center", justifyContent: "center"
-          }}>
-            {exporting ? "Exporting…" : (state.queue.length > 0 ? "↓ PNG & Nächster ▶" : "↓ PNG Export")}
-          </button>
+            {creatives.map((c, i) => (
+              <div key={c.id} style={{
+                flexShrink: 0, cursor: "pointer", position: "relative",
+                border: c.id === activeId ? `3px solid ${COLORS.accent}` : `2px solid ${COLORS.border}`,
+                borderRadius: "8px", overflow: "hidden",
+                transition: "border-color 0.2s, transform 0.15s",
+                transform: c.id === activeId ? "scale(1.05)" : "scale(1)",
+                width: "75px", height: "133px",
+              }} onClick={() => setActiveId(c.id)}>
+                <div style={{
+                  transform: "scale(0.069)", transformOrigin: "top left",
+                  width: "1080px", height: "1920px",
+                  background: c.bgImage ? "transparent" : "#000", position: "relative",
+                }}>
+                  {c.bgImage && !c.bgIsVideo && <img src={c.bgImage} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} alt="" />}
+                  {c.overlay.enabled && <div style={{ position: "absolute", inset: 0, backgroundColor: hexToRgba(c.overlay.hex, c.overlay.opacity) }} />}
+                  <div style={{ position: "relative", zIndex: 2, width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "center",
+                    transform: `scale(${c.textScale / 100})`, transformOrigin: "center center" }}>
+                    <AutoRenderer creative={c} />
+                  </div>
+                </div>
+                {/* Number badge */}
+                <div style={{
+                  position: "absolute", bottom: "3px", left: "50%", transform: "translateX(-50%)",
+                  background: c.id === activeId ? COLORS.accent : "rgba(0,0,0,0.7)",
+                  color: "#fff", fontSize: "10px", fontWeight: 700, padding: "1px 6px",
+                  borderRadius: "4px", fontFamily: "system-ui",
+                }}>{i + 1}</div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-// ━━━ APP ━━━
-export default function App() {
-  const [state, dispatch] = useReducer(reducer, initialState);
-  const exportRef = useRef(null);
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STEP 3: EXPORT PANEL — Bulk Render & Download
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function ExportPanel({ creatives, setCreatives, setStep, activeId, setActiveId }) {
+  const [exporting, setExporting] = useState(false);
+  const [progress, setProgress] = useState({ current: 0, total: 0, status: "" });
+  const [exportType, setExportType] = useState("png"); // png or mp4
+  const exportRefs = useRef({});
 
-  // Inject keyframes globally once
-  useEffect(() => {
-    if (!document.getElementById("editor-keyframes")) {
-      const style = document.createElement("style");
-      style.id = "editor-keyframes";
-      style.textContent = `
-        @keyframes subtleFade {
-          0% { opacity: 0; }
-          100% { opacity: 1; }
-        }
-        @keyframes subtleDrift {
-          0% { opacity: 0; transform: translateY(15px); }
-          100% { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes subtleBlur {
-          0% { opacity: 0; filter: blur(12px); transform: scale(0.95); }
-          100% { opacity: 1; filter: blur(0px); transform: scale(1); }
-        }
-      `;
-      document.head.appendChild(style);
+  // Select/Deselect
+  const toggleSelect = (id) => {
+    setCreatives(prev => prev.map(c => c.id === id ? { ...c, selected: !c.selected } : c));
+  };
+  const selectAll = () => setCreatives(prev => prev.map(c => ({ ...c, selected: true })));
+  const deselectAll = () => setCreatives(prev => prev.map(c => ({ ...c, selected: false })));
+
+  const selectedCount = creatives.filter(c => c.selected).length;
+
+  // Export single PNG
+  const exportSinglePNG = async (creative, idx) => {
+    const el = exportRefs.current[creative.id];
+    if (!el) return;
+    if (!window.html2canvas) {
+      const s = document.createElement("script");
+      s.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
+      document.head.appendChild(s);
+      await new Promise(r => { s.onload = r; s.onerror = () => r(); });
     }
-  }, []);
+    const canvas = await window.html2canvas(el, { scale: 1, useCORS: true, allowTaint: true, backgroundColor: null });
+    const link = document.createElement("a");
+    const title = parseInput(creative.inputText).title.replace(/[^a-zA-Z0-9äöüÄÖÜ]/g, "_").slice(0, 30);
+    link.download = `reel-${String(idx + 1).padStart(2, "0")}-${title}.png`;
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+    await new Promise(r => setTimeout(r, 300)); // prevent browser blocking
+  };
+
+  // Bulk Export
+  const handleBulkExport = async () => {
+    const selected = creatives.filter(c => c.selected);
+    if (selected.length === 0) return;
+    setExporting(true);
+    setProgress({ current: 0, total: selected.length, status: "Starte Export..." });
+
+    for (let i = 0; i < selected.length; i++) {
+      setProgress({ current: i + 1, total: selected.length, status: `Exportiere ${i + 1}/${selected.length}...` });
+      await exportSinglePNG(selected[i], creatives.indexOf(selected[i]));
+    }
+
+    setProgress({ current: selected.length, total: selected.length, status: "✅ Fertig!" });
+    setTimeout(() => setExporting(false), 1500);
+  };
 
   return (
-    <Ctx.Provider value={{ state, dispatch }}>
-      <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
-        <Panel exportRef={exportRef} />
-        <Viewport exportRef={exportRef} />
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+      {/* Top Bar */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "12px 20px", borderBottom: `1px solid ${COLORS.border}`,
+        background: "rgba(13,15,20,0.95)",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <h3 style={{ color: "#fff", fontSize: "16px", fontWeight: 700, margin: 0, fontFamily: "system-ui" }}>
+            📦 Bulk Export
+          </h3>
+          <span style={{ color: COLORS.accentText, fontSize: "12px", fontFamily: "system-ui" }}>
+            {selectedCount} von {creatives.length} ausgewählt
+          </span>
+        </div>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <button onClick={selectAll} style={abtn}>Alle auswählen</button>
+          <button onClick={deselectAll} style={abtn}>Keine</button>
+          <button onClick={handleBulkExport} disabled={exporting || selectedCount === 0} style={{
+            padding: "10px 28px", fontSize: "13px", fontWeight: 700,
+            background: exporting ? "#333" : `linear-gradient(135deg, ${COLORS.success}, #16a34a)`,
+            border: "none", borderRadius: "8px", color: "#fff", cursor: exporting ? "wait" : "pointer",
+            fontFamily: "system-ui", opacity: selectedCount === 0 ? 0.4 : 1,
+          }}>
+            {exporting ? progress.status : `↓ ${selectedCount} PNGs exportieren`}
+          </button>
+        </div>
       </div>
-    </Ctx.Provider>
+
+      {/* Progress Bar */}
+      {exporting && (
+        <div style={{ padding: "0 20px", background: COLORS.panel }}>
+          <div style={{ height: "4px", borderRadius: "2px", background: COLORS.card, marginTop: "8px", marginBottom: "8px" }}>
+            <div style={{
+              height: "100%", borderRadius: "2px",
+              background: `linear-gradient(90deg, ${COLORS.accent}, ${COLORS.success})`,
+              width: `${(progress.current / progress.total) * 100}%`,
+              transition: "width 0.3s",
+            }} />
+          </div>
+        </div>
+      )}
+
+      {/* Grid of all creatives */}
+      <div style={{
+        flex: 1, overflowY: "auto", padding: "20px",
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+        gap: "16px",
+        alignContent: "start",
+      }}>
+        {creatives.map((c, i) => (
+          <div key={c.id} style={{
+            position: "relative", borderRadius: "12px", overflow: "hidden",
+            border: c.selected ? `3px solid ${COLORS.success}` : `2px solid ${COLORS.border}`,
+            background: COLORS.card,
+            transition: "border-color 0.2s, transform 0.15s",
+            cursor: "pointer",
+          }}>
+            {/* Checkbox */}
+            <div style={{
+              position: "absolute", top: "8px", left: "8px", zIndex: 10,
+              display: "flex", alignItems: "center", gap: "6px",
+            }}>
+              <input type="checkbox" checked={c.selected}
+                onChange={() => toggleSelect(c.id)}
+                style={{ accentColor: COLORS.success, width: "16px", height: "16px", cursor: "pointer" }} />
+              <span style={{
+                background: "rgba(0,0,0,0.7)", color: "#fff", fontSize: "10px",
+                fontWeight: 700, padding: "2px 6px", borderRadius: "4px",
+              }}>{i + 1}</span>
+            </div>
+
+            {/* Edit button */}
+            <button onClick={() => { setActiveId(c.id); setStep("edit"); }} style={{
+              position: "absolute", top: "8px", right: "8px", zIndex: 10,
+              background: "rgba(108,99,255,0.8)", color: "#fff", border: "none",
+              borderRadius: "6px", padding: "3px 8px", fontSize: "9px", fontWeight: 600,
+              cursor: "pointer", fontFamily: "system-ui",
+            }}>✏️</button>
+
+            {/* Preview */}
+            <div style={{ width: "100%", aspectRatio: "9/16", overflow: "hidden", position: "relative" }}
+              onClick={() => toggleSelect(c.id)}>
+              <div
+                ref={el => { if (el) exportRefs.current[c.id] = el; }}
+                style={{
+                  transform: "scale(0.148)", transformOrigin: "top left",
+                  width: "1080px", height: "1920px",
+                  background: c.bgImage ? "transparent" : "#000", position: "absolute", top: 0, left: 0,
+                }}>
+                {c.bgImage && !c.bgIsVideo && <img src={c.bgImage} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} alt="" />}
+                {c.bgImage && c.bgIsVideo && <video src={c.bgImage} muted loop autoPlay playsInline style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />}
+                {c.overlay.enabled && <div style={{ position: "absolute", inset: 0, zIndex: 1, backgroundColor: hexToRgba(c.overlay.hex, c.overlay.opacity) }} />}
+                <div style={{
+                  position: "relative", zIndex: 2, width: "100%", height: "100%",
+                  display: "flex", flexDirection: "column", justifyContent: "center",
+                  transform: `scale(${c.textScale / 100}) translateY(${c.textOffsetY}px)`,
+                  transformOrigin: "center center",
+                }}>
+                  <AutoRenderer creative={c} />
+                </div>
+              </div>
+            </div>
+
+            {/* Title preview */}
+            <div style={{
+              padding: "8px 10px", borderTop: `1px solid ${COLORS.border}`,
+            }}>
+              <div style={{
+                fontSize: "10px", fontWeight: 600, color: c.selected ? COLORS.success : COLORS.textDim,
+                fontFamily: "system-ui", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}>
+                {c.selected ? "✅ " : ""}{parseInput(c.inputText).title}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// MAIN APP
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+export default function App() {
+  const [step, setStep] = useState("import"); // import | edit | export
+  const [creatives, setCreatives] = useState([]);
+  const [activeId, setActiveId] = useState(null);
+
+  // Set active to first if none selected
+  useEffect(() => {
+    if (!activeId && creatives.length > 0) setActiveId(creatives[0].id);
+  }, [creatives, activeId]);
+
+  const steps = [
+    { key: "import", label: "📥 Import", num: "1" },
+    { key: "edit", label: "✏️ Bearbeiten", num: "2" },
+    { key: "export", label: "📦 Export", num: "3" },
+  ];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden", background: COLORS.bg }}>
+      {/* Top Navigation Bar */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "0 20px", height: "48px", flexShrink: 0,
+        background: COLORS.panel, borderBottom: `1px solid ${COLORS.border}`,
+      }}>
+        {/* Logo */}
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <span style={{ fontSize: "16px", fontWeight: 800, color: "#fff", fontFamily: "system-ui", letterSpacing: "-0.5px" }}>
+            ⚡ Reel Producer
+          </span>
+          <span style={{ fontSize: "10px", color: COLORS.accentText, fontFamily: "monospace", background: COLORS.accentBg,
+            padding: "2px 8px", borderRadius: "4px" }}>BULK MODE</span>
+        </div>
+
+        {/* Step Navigation */}
+        <div style={{ display: "flex", gap: "4px" }}>
+          {steps.map((s, i) => {
+            const isActive = step === s.key;
+            const isCompleted = steps.findIndex(x => x.key === step) > i;
+            const isDisabled = s.key === "edit" && creatives.length === 0 || s.key === "export" && creatives.length === 0;
+            return (
+              <button key={s.key} onClick={() => !isDisabled && setStep(s.key)}
+                disabled={isDisabled}
+                style={{
+                  display: "flex", alignItems: "center", gap: "6px",
+                  padding: "6px 16px", fontSize: "12px", fontWeight: isActive ? 700 : 500,
+                  background: isActive ? COLORS.accentBg : "transparent",
+                  border: `1px solid ${isActive ? COLORS.accent : isDisabled ? "transparent" : COLORS.border}`,
+                  borderRadius: "8px", cursor: isDisabled ? "not-allowed" : "pointer",
+                  fontFamily: "system-ui",
+                  color: isActive ? COLORS.accentText : isDisabled ? "rgba(255,255,255,0.15)" : COLORS.textDim,
+                  opacity: isDisabled ? 0.5 : 1,
+                  transition: "all 0.2s",
+                }}>
+                <span style={{
+                  width: "20px", height: "20px", borderRadius: "50%", display: "flex",
+                  alignItems: "center", justifyContent: "center", fontSize: "10px", fontWeight: 700,
+                  background: isActive ? COLORS.accent : isCompleted ? COLORS.success : "rgba(255,255,255,0.05)",
+                  color: (isActive || isCompleted) ? "#fff" : COLORS.textDim,
+                }}>{isCompleted ? "✓" : s.num}</span>
+                {s.label}
+                {i < steps.length - 1 && (
+                  <span style={{ color: COLORS.textMuted, marginLeft: "8px" }}>›</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Creative Counter */}
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <span style={{ fontSize: "11px", color: COLORS.textDim, fontFamily: "system-ui" }}>
+            {creatives.length} Creative{creatives.length !== 1 ? "s" : ""}
+          </span>
+          {creatives.length > 0 && (
+            <button onClick={() => { setCreatives([]); setActiveId(null); setStep("import"); }}
+              style={{ ...abtn, fontSize: "9px", padding: "3px 8px", color: "#FF6B6B", borderColor: "rgba(229,9,20,0.2)" }}>
+              Reset
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div style={{ flex: 1, overflow: "hidden" }}>
+        {step === "import" && (
+          <ImportPanel creatives={creatives} setCreatives={setCreatives}
+            setActiveId={setActiveId} setStep={setStep} />
+        )}
+        {step === "edit" && (
+          <EditPanel creatives={creatives} setCreatives={setCreatives}
+            activeId={activeId} setActiveId={setActiveId} setStep={setStep} />
+        )}
+        {step === "export" && (
+          <ExportPanel creatives={creatives} setCreatives={setCreatives}
+            setStep={setStep} activeId={activeId} setActiveId={setActiveId} />
+        )}
+      </div>
+    </div>
   );
 }
