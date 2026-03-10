@@ -733,48 +733,77 @@ function ExportPanel(props) {
   var exportSinglePNG = function(creative, idx) {
     return new Promise(function(resolve) {
       var el = exportRefs.current[creative.id];
-      if (!el) { resolve(); return; }
-
+      if (!el) { resolve(null); return; }
       var doExport = function() {
-        window.html2canvas(el, { scale: use4KExport ? (3840 / (el.offsetHeight || el.getBoundingClientRect().height)) : 1, useCORS: true, allowTaint: true, backgroundColor: null }).then(function(canvas) {
-          var link = document.createElement("a");
-          var title = parseInput(creative.inputText).title.replace(/[^a-zA-Z0-9]/g, "_").slice(0, 30);
-          link.download = "reel-" + String(idx + 1).padStart(2, "0") + "-" + title + ".png";
-          link.href = canvas.toDataURL("image/png");
-          link.click();
-          setTimeout(resolve, 400);
+        var videos = el.querySelectorAll('video');
+        var videoStyles = [];
+        videos.forEach(function(v) {
+          videoStyles.push(v.style.visibility);
+          v.style.visibility = 'hidden';
+        });
+        window.html2canvas(el, {
+          scale: use4KExport ? (3840 / (el.offsetHeight || el.getBoundingClientRect().height)) : 1,
+          useCORS: true,
+          allowTaint: true,
+          backgroundColor: '#000000'
+        }).then(function(canvas) {
+          videos.forEach(function(v, i) { v.style.visibility = videoStyles[i] || ''; });
+          var title = parseInput(creative.inputText).title.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30);
+          var filename = 'reel-' + String(idx + 1).padStart(2, '0') + '-' + title + '.png';
+          canvas.toBlob(function(blob) { resolve({ filename: filename, blob: blob }); }, 'image/png');
+        }).catch(function() {
+          videos.forEach(function(v, i) { v.style.visibility = videoStyles[i] || ''; });
+          resolve(null);
         });
       };
-
       if (!window.html2canvas) {
-        var s = document.createElement("script");
-        s.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
+        var s = document.createElement('script');
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
         s.onload = doExport;
         document.head.appendChild(s);
-      } else {
-        doExport();
-      }
+      } else { doExport(); }
     });
   };
-
   var handleBulkExport = function() {
     var selected = creatives.filter(function(c) { return c.selected; });
     if (selected.length === 0) return;
     setExporting(true);
-    setProgress({ current: 0, total: selected.length, status: "Starte Export..." });
-
-    var exportNext = function(i) {
-      if (i >= selected.length) {
-        setProgress({ current: selected.length, total: selected.length, status: "Fertig!" });
-        setTimeout(function() { setExporting(false); }, 1500);
-        return;
-      }
-      setProgress({ current: i + 1, total: selected.length, status: "Exportiere " + (i + 1) + "/" + selected.length + "..." });
-      exportSinglePNG(selected[i], creatives.indexOf(selected[i])).then(function() {
-        exportNext(i + 1);
+    setProgress({ current: 0, total: selected.length, status: 'Starte Export...' });
+    var loadJSZip = function() {
+      return new Promise(function(resolve) {
+        if (window.JSZip) { resolve(window.JSZip); return; }
+        var s = document.createElement('script');
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+        s.onload = function() { resolve(window.JSZip); };
+        document.head.appendChild(s);
       });
     };
-    exportNext(0);
+    loadJSZip().then(function(JSZip) {
+      var zip = new JSZip();
+      var exportNext = function(i) {
+        if (i >= selected.length) {
+          setProgress({ current: selected.length, total: selected.length, status: 'ZIP wird erstellt...' });
+          zip.generateAsync({ type: 'blob' }).then(function(zipBlob) {
+            var link = document.createElement('a');
+            link.download = 'reel-export-' + Date.now() + '.zip';
+            link.href = URL.createObjectURL(zipBlob);
+            link.click();
+            setTimeout(function() { URL.revokeObjectURL(link.href); }, 10000);
+            setProgress({ current: selected.length, total: selected.length, status: 'Fertig! ZIP heruntergeladen.' });
+            setTimeout(function() { setExporting(false); }, 2000);
+          });
+          return;
+        }
+        setProgress({ current: i + 1, total: selected.length, status: 'Exportiere ' + (i + 1) + '/' + selected.length + '...' });
+        exportSinglePNG(selected[i], creatives.indexOf(selected[i])).then(function(result) {
+          if (result && result.blob) {
+            zip.file(result.filename, result.blob);
+          }
+          exportNext(i + 1);
+        });
+      };
+      exportNext(0);
+    });
   };
 
   return (
@@ -805,7 +834,7 @@ function ExportPanel(props) {
             border: "none", borderRadius: "8px", color: "#fff", cursor: exporting ? "wait" : "pointer",
             fontFamily: "system-ui", opacity: selectedCount === 0 ? 0.4 : 1,
           }}>
-            {exporting ? progress.status : selectedCount + " PNGs exportieren"}
+            {exporting ? progress.status : selectedCount + " PNGs als ZIP"}
           </button>
         </div>
       </div>
