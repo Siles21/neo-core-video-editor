@@ -716,6 +716,7 @@ function ExportPanel(props) {
   var setStep = props.setStep;
   var setActiveId = props.setActiveId;
   var _ex = useState(false); var exporting = _ex[0]; var setExporting = _ex[1];
+  var _4k = useState(false); var use4KExport = _4k[0]; var setUse4KExport = _4k[1];
   var _pr = useState({ current: 0, total: 0, status: "" }); var progress = _pr[0]; var setProgress = _pr[1];
   var exportRefs = useRef({});
 
@@ -735,7 +736,7 @@ function ExportPanel(props) {
       if (!el) { resolve(); return; }
 
       var doExport = function() {
-        window.html2canvas(el, { scale: 1, useCORS: true, allowTaint: true, backgroundColor: null }).then(function(canvas) {
+        window.html2canvas(el, { scale: use4KExport ? (3840 / (el.offsetHeight || el.getBoundingClientRect().height)) : 1, useCORS: true, allowTaint: true, backgroundColor: null }).then(function(canvas) {
           var link = document.createElement("a");
           var title = parseInput(creative.inputText).title.replace(/[^a-zA-Z0-9]/g, "_").slice(0, 30);
           link.download = "reel-" + String(idx + 1).padStart(2, "0") + "-" + title + ".png";
@@ -794,6 +795,10 @@ function ExportPanel(props) {
         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
           <button onClick={selectAll} style={abtn}>Alle</button>
           <button onClick={deselectAll} style={abtn}>Keine</button>
+          <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer", userSelect: "none" }}>
+            <input type="checkbox" checked={use4KExport} onChange={function(e) { setUse4KExport(e.target.checked); }} style={{ width: "16px", height: "16px", cursor: "pointer", accentColor: "#6c63ff" }} />
+            <span style={{ color: use4KExport ? "#6c63ff" : "#aaa", fontSize: "12px", fontWeight: 600, fontFamily: "system-ui", whiteSpace: "nowrap" }}>2160×3840 (4K)</span>
+          </label>
           <button onClick={handleBulkExport} disabled={exporting || selectedCount === 0} style={{
             padding: "10px 28px", fontSize: "13px", fontWeight: 700,
             background: exporting ? "#333" : "linear-gradient(135deg, " + C.success + ", #16a34a)",
