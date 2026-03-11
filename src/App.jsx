@@ -374,6 +374,7 @@ function ImportPanel(props) {
       }),
     }).then(function(res) { return res.json(); })
     .then(function(data) {
+      if (data.error) { alert("OpenAI Fehler: " + data.error.message); setAiLoading(false); return; }
       var generated = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
       if (generated) {
         var parts = generated.trim().split("---").map(function(p) { return p.trim(); }).filter(Boolean);
@@ -417,6 +418,11 @@ function ImportPanel(props) {
         }),
       }).then(function(res) { return res.json(); })
       .then(function(data) {
+        if (data.error) {
+          alert("OpenAI Fehler: " + data.error.message);
+          setToProgress(false);
+          return;
+        }
         var generated = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
         if (generated) {
           var parts = generated.trim().split("---").map(function(p) { return p.trim(); }).filter(Boolean);
