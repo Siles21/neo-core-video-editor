@@ -279,6 +279,13 @@ function ImportPanel(props) {
   var _al = useState(false); var aiLoading = _al[0]; var setAiLoading = _al[1];
   var _ac = useState(5); var aiCount = _ac[0]; var setAiCount = _ac[1];
   var _sk = useState(false); var showKey = _sk[0]; var setShowKey = _sk[1];
+  var _pt = useState("video"); var projectType = _pt[0]; var setProjectType = _pt[1];
+  var _toc = useState(50); var toCount = _toc[0]; var setToCount = _toc[1];
+  var _tot = useState(""); var toTopics = _tot[0]; var setToTopics = _tot[1];
+  var _tos = useState(""); var toStyle = _tos[0]; var setToStyle = _tos[1];
+  var _ton = useState(""); var toTone = _ton[0]; var setToTone = _ton[1];
+  var _top = useState(false); var toProgress = _top[0]; var setToProgress = _top[1];
+  var _tod = useState({ done: 0, total: 0 }); var toBatchState = _tod[0]; var setToBatchState = _tod[1];
 
   useEffect(function() { if (apiKey) localStorage.setItem("openai_key", apiKey); }, [apiKey]);
 
@@ -337,6 +344,75 @@ function ImportPanel(props) {
     .finally(function() { setAiLoading(false); });
   };
 
+  var handleTextOnlyGenerate = function() {
+    if (!apiKey.trim()) { alert("Bitte OpenAI API-Key eingeben."); return; }
+    var total = Math.max(1, Math.min(200, toCount));
+    var batchSize = 5;
+    var batches = Math.ceil(total / batchSize);
+    var allCreated = 0;
+    setToProgress(true);
+    setToBatchState({ done: 0, total: total });
+
+    var runBatch = function(batchIndex) {
+      if (batchIndex >= batches) {
+        setToProgress(false);
+        return;
+      }
+      var thisSize = Math.min(batchSize, total - allCreated);
+      var topicsHint = toTopics.trim() ? ("Themen (bevorzuge diese): " + toTopics + ". ") : "";
+      var styleHint = toStyle.trim() ? ("Stil: " + toStyle + ". ") : "";
+      var toneHint = toTone.trim() ? ("Ton: " + toTone + ". ") : "";
+      var sysMsg = "Du bist ein Experte fuer inspirierende, motivierende und informative Social-Media-Grafiktexte. " +
+        "Erstelle kurze, kraftvolle Texte fuer Reels und Story-Grafiken. " +
+        "Jede Grafik besteht aus: THEMA: [Thema]\nTITEL: [kurzer Haupttext, max 8 Woerter]\nSUBTITEL: [ergaenzender Satz, max 12 Woerter]\n" +
+        "Trenne die Grafiken mit ---";
+      var userMsg = topicsHint + styleHint + toneHint +
+        "Erstelle genau " + thisSize + " verschiedene Text-Grafiken. Variiere die Themen stark.";
+
+      fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + apiKey.trim() },
+        body: JSON.stringify({
+          model: "gpt-4o-mini", temperature: 0.9, max_tokens: 1500,
+          messages: [
+            { role: "system", content: sysMsg },
+            { role: "user", content: userMsg },
+          ],
+        }),
+      }).then(function(res) { return res.json(); })
+      .then(function(data) {
+        var generated = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+        if (generated) {
+          var parts = generated.trim().split("---").map(function(p) { return p.trim(); }).filter(Boolean);
+          var colorKeys = Object.keys(COLOR_PRESETS);
+          var newC = parts.map(function(rawText) {
+            var lines = rawText.split("\n").map(function(l) { return l.trim(); }).filter(Boolean);
+            var topic = "";
+            var title = "";
+            var subtitle = "";
+            lines.forEach(function(l) {
+              if (l.startsWith("THEMA:")) topic = l.replace("THEMA:", "").trim();
+              else if (l.startsWith("TITEL:")) title = l.replace("TITEL:", "").trim();
+              else if (l.startsWith("SUBTITEL:")) subtitle = l.replace("SUBTITEL:", "").trim();
+            });
+            var combined = (title || lines[0] || "Text") + (subtitle ? "\n" + subtitle : "") + (topic ? "\n\nThema: " + topic : "");
+            return createCreative({ text: combined, color: pickRandom(colorKeys), bgImage: null, bgIsVideo: false });
+          });
+          setCreatives(function(prev) { return prev.concat(newC); });
+          allCreated += newC.length;
+          setToBatchState({ done: allCreated, total: total });
+          if (newC.length > 0 && batchIndex === 0) setActiveId(newC[0].id);
+        }
+        runBatch(batchIndex + 1);
+      }).catch(function(e) {
+        alert("KI-Fehler: " + e.message);
+        setToProgress(false);
+      });
+    };
+
+    runBatch(0);
+  };
+
   var addEmpty = function() {
     var c = createCreative({ text: "Neuer Titel\nUntertitel\nLabel: Wert" });
     setCreatives(function(prev) { return prev.concat([c]); });
@@ -353,6 +429,111 @@ function ImportPanel(props) {
           </p>
         </div>
 
+        {/* ━━━ PROJEKT-TYP AUSWAHL ━━━ */}
+        <div style={Object.assign({}, sec, { padding: "16px", marginBottom: "16px" })}>
+          <div style={Object.assign({}, lab, { marginBottom: "12px" })}><span>Projekt-Typ waehlen</span></div>
+          <div style={{ display: "flex", gap: "10px" }}>
+            {[
+              { id: "video", label: "Video", icon: "🎬", desc: "Hintergrundvideo + Text" },
+              { id: "image", label: "Bild + Text", icon: "🖼️", desc: "Bild als Hintergrund" },
+              { id: "textonly", label: "Text Only", icon: "✨", desc: "Grafikvorlagen generieren" },
+            ].map(function(pt) {
+              var active = projectType === pt.id;
+              return (
+                <button key={pt.id} onClick={function() { setProjectType(pt.id); }} style={{
+                  flex: 1, padding: "12px 8px", borderRadius: "8px", cursor: "pointer",
+                  border: active ? "2px solid " + C.accent : "1px solid " + C.border,
+                  background: active ? C.accentBg : C.card,
+                  color: active ? C.accentText : C.dim,
+                  fontFamily: "system-ui", textAlign: "center", transition: "all 0.15s",
+                }}>
+                  <div style={{ fontSize: "22px", marginBottom: "4px" }}>{pt.icon}</div>
+                  <div style={{ fontSize: "12px", fontWeight: 700 }}>{pt.label}</div>
+                  <div style={{ fontSize: "10px", opacity: 0.7, marginTop: "2px" }}>{pt.desc}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ━━━ TEXT ONLY: GRAFIKGENERATOR ━━━ */}
+        {projectType === "textonly" && (
+          <div style={Object.assign({}, sec, { padding: "20px", border: "1px solid rgba(108,99,255,0.3)", background: "rgba(108,99,255,0.06)" })}>
+            <div style={Object.assign({}, lab, { marginBottom: "14px" })}><span>✨ Text Only Grafikgenerator</span></div>
+
+            {/* API Key */}
+            <div style={{ marginBottom: "12px" }}>
+              <div style={{ color: C.dim, fontSize: "11px", fontFamily: "monospace", marginBottom: "4px" }}>OPENAI API-KEY</div>
+              <input type="password" value={apiKey} onChange={function(e) { setApiKey(e.target.value); }} placeholder="sk-..." style={{
+                width: "100%", padding: "8px 10px", background: "rgba(255,255,255,0.04)", border: "1px solid " + C.border,
+                borderRadius: "6px", color: "#fff", fontSize: "12px", fontFamily: "monospace", boxSizing: "border-box",
+              }} />
+            </div>
+
+            {/* Anzahl + Themen Grid */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "12px", marginBottom: "12px" }}>
+              <div>
+                <div style={{ color: C.dim, fontSize: "11px", fontFamily: "monospace", marginBottom: "4px" }}>ANZAHL DER GRAFIKEN</div>
+                <input type="number" min="1" max="200" value={toCount} onChange={function(e) { setToCount(parseInt(e.target.value) || 1); }} style={{
+                  width: "100%", padding: "8px 10px", background: "rgba(255,255,255,0.04)", border: "1px solid " + C.border,
+                  borderRadius: "6px", color: "#fff", fontSize: "14px", fontWeight: 700, fontFamily: "monospace", boxSizing: "border-box",
+                }} />
+              </div>
+              <div>
+                <div style={{ color: C.dim, fontSize: "11px", fontFamily: "monospace", marginBottom: "4px" }}>THEMEN (optional, kommagetrennt)</div>
+                <input type="text" value={toTopics} onChange={function(e) { setToTopics(e.target.value); }} placeholder="Erfolg, Mindset, Business, Finanzen..." style={{
+                  width: "100%", padding: "8px 10px", background: "rgba(255,255,255,0.04)", border: "1px solid " + C.border,
+                  borderRadius: "6px", color: "#fff", fontSize: "12px", fontFamily: "system-ui", boxSizing: "border-box",
+                }} />
+              </div>
+            </div>
+
+            {/* Stil + Ton Grid */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "16px" }}>
+              <div>
+                <div style={{ color: C.dim, fontSize: "11px", fontFamily: "monospace", marginBottom: "4px" }}>STIL (optional)</div>
+                <input type="text" value={toStyle} onChange={function(e) { setToStyle(e.target.value); }} placeholder="Minimalistisch, Bold, Modern..." style={{
+                  width: "100%", padding: "8px 10px", background: "rgba(255,255,255,0.04)", border: "1px solid " + C.border,
+                  borderRadius: "6px", color: "#fff", fontSize: "12px", fontFamily: "system-ui", boxSizing: "border-box",
+                }} />
+              </div>
+              <div>
+                <div style={{ color: C.dim, fontSize: "11px", fontFamily: "monospace", marginBottom: "4px" }}>TON (optional)</div>
+                <input type="text" value={toTone} onChange={function(e) { setToTone(e.target.value); }} placeholder="Motivierend, Sachlich, Inspirierend..." style={{
+                  width: "100%", padding: "8px 10px", background: "rgba(255,255,255,0.04)", border: "1px solid " + C.border,
+                  borderRadius: "6px", color: "#fff", fontSize: "12px", fontFamily: "system-ui", boxSizing: "border-box",
+                }} />
+              </div>
+            </div>
+
+            {/* Progress */}
+            {toProgress && (
+              <div style={{ marginBottom: "12px", padding: "10px", background: "rgba(108,99,255,0.1)", borderRadius: "6px", border: "1px solid rgba(108,99,255,0.2)" }}>
+                <div style={{ color: C.accentText, fontSize: "12px", fontFamily: "monospace", marginBottom: "6px" }}>
+                  Generiere... {toBatchState.done}/{toBatchState.total} Grafiken erstellt
+                </div>
+                <div style={{ height: "4px", background: "rgba(255,255,255,0.1)", borderRadius: "2px", overflow: "hidden" }}>
+                  <div style={{ height: "100%", background: C.accent, borderRadius: "2px", width: toBatchState.total > 0 ? Math.round((toBatchState.done / toBatchState.total) * 100) + "%" : "0%", transition: "width 0.3s" }} />
+                </div>
+              </div>
+            )}
+
+            {/* Generate Button */}
+            <button onClick={handleTextOnlyGenerate} disabled={toProgress} style={{
+              width: "100%", padding: "12px", fontSize: "13px", fontWeight: 700,
+              background: toProgress ? "rgba(108,99,255,0.3)" : "linear-gradient(135deg, #6C63FF, #A9A3FF)",
+              border: "none", borderRadius: "8px", color: "#fff", cursor: toProgress ? "not-allowed" : "pointer",
+              fontFamily: "system-ui", letterSpacing: "0.5px",
+            }}>
+              {toProgress ? ("⏳ Generiere... (" + toBatchState.done + "/" + toBatchState.total + ")") : ("✨ " + toCount + " Grafikvorlagen generieren")}
+            </button>
+
+            <div style={{ marginTop: "10px", color: C.muted, fontSize: "10px", fontFamily: "monospace", textAlign: "center" }}>
+              Automatische Batch-Generierung • 5 Grafiken pro API-Aufruf • Alle vollst. editierbar
+            </div>
+          </div>
+        )}
+
         <div style={Object.assign({}, sec, { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px" })}>
           <span style={{ color: C.accentText, fontSize: "14px", fontWeight: 700, fontFamily: "system-ui" }}>
             {creatives.length} Creative{creatives.length !== 1 ? "s" : ""} geladen
@@ -366,6 +547,7 @@ function ImportPanel(props) {
           ) : null}
         </div>
 
+        {projectType !== "textonly" && (
         <div style={Object.assign({}, sec, { padding: "20px", textAlign: "center", border: "2px dashed " + C.border })}>
           <input ref={fileRef} type="file" accept="image/*,video/mp4" multiple onChange={handleFiles} style={{ display: "none" }} />
           <div style={{ fontSize: "32px", marginBottom: "8px" }}>Upload</div>
@@ -376,7 +558,9 @@ function ImportPanel(props) {
             Dateien auswaehlen
           </button>
         </div>
+        )}
 
+        {projectType !== "textonly" && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
           <div style={Object.assign({}, sec, { padding: "14px" })}>
             <div style={Object.assign({}, lab, { marginBottom: "8px" })}><span>Vorlagen</span></div>
@@ -429,7 +613,9 @@ function ImportPanel(props) {
             </div>
           </div>
         </div>
+        )}
 
+        {projectType !== "textonly" && (
         <div style={sec}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ color: C.dim, fontSize: "10px", fontFamily: "monospace", textTransform: "uppercase" }}>Text Bulk-Import</span>
@@ -450,6 +636,7 @@ function ImportPanel(props) {
             </div>
           ) : null}
         </div>
+        )}
 
         {creatives.length > 0 ? (
           <div style={sec}>
