@@ -741,17 +741,26 @@ function ExportPanel(props) {
           videoStyles.push(v.style.visibility);
           v.style.visibility = 'hidden';
         });
+        // Fix: temporarily remove CSS transform so html2canvas captures at full resolution
+        var savedTransform = el.style.transform;
+        var savedTransformOrigin = el.style.transformOrigin;
+        el.style.transform = 'none';
+        el.style.transformOrigin = 'left top';
         window.html2canvas(el, {
           scale: use4KExport ? (3840 / (el.offsetHeight || el.getBoundingClientRect().height)) : 1,
           useCORS: true,
           allowTaint: true,
           backgroundColor: '#000000'
         }).then(function(canvas) {
+          el.style.transform = savedTransform;
+          el.style.transformOrigin = savedTransformOrigin;
           videos.forEach(function(v, i) { v.style.visibility = videoStyles[i] || ''; });
           var title = parseInput(creative.inputText).title.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30);
           var filename = 'reel-' + String(idx + 1).padStart(2, '0') + '-' + title + '.png';
           canvas.toBlob(function(blob) { resolve({ filename: filename, blob: blob }); }, 'image/png');
         }).catch(function() {
+          el.style.transform = savedTransform;
+          el.style.transformOrigin = savedTransformOrigin;
           videos.forEach(function(v, i) { v.style.visibility = videoStyles[i] || ''; });
           resolve(null);
         });
