@@ -1,5 +1,115 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 
+// âââ UTILS âââ
+function hexToRgba(hex, op) {
+  const b = parseInt(hex.slice(1), 16);
+  return `rgba(${(b >> 16) & 255},${(b >> 8) & 255},${b & 255},${op / 100})`;
+}
+function pickRandom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+
+// âââ COLOR PRESETS âââ
+const COLOR_PRESETS = {
+  blau_gelb: { name: "Blau/Gelb", colA: "#3B82F6", colB: "#EAB308", colAText: "#FFF", colBText: "#000", title: "#000000", titleBg: "#FFFFFF" },
+  gruen_rot: { name: "GrÃ¼n/Rot", colA: "#22C55E", colB: "#E50914", colAText: "#000", colBText: "#FFF", title: "#FFFFFF", titleBg: "#000000" },
+  gelb_schwarz: { name: "Gelb/Schwarz", colA: "#EAB308", colB: "#000000", colAText: "#000", colBText: "#FFF", title: "#FFFFFF", titleBg: "#000000" },
+  rot_weiss: { name: "Rot/WeiÃ", colA: "#E50914", colB: "#FFFFFF", colAText: "#FFF", colBText: "#000", title: "#000000", titleBg: "#FFFFFF" },
+  schwarz_weiss: { name: "Schwarz/WeiÃ", colA: "#000000", colB: "#FFFFFF", colAText: "#FFF", colBText: "#000", title: "#000000", titleBg: "#FFFFFF" },
+  gelb_rot: { name: "Gelb/Rot", colA: "#EAB308", colB: "#E50914", colAText: "#000", colBText: "#FFF", title: "#FFFFFF", titleBg: "#FFFFFF" },
+  blau_rot: { name: "Blau/Rot", colA: "#3B82F6", colB: "#E50914", colAText: "#FFF", colBText: "#FFF", title: "#000000", titleBg: "#FFFFFF" },
+  gruen_blau: { name: "GrÃ¼n/Blau", colA: "#22C55E", colB: "#3B82F6", colAText: "#000", colBText: "#FFF", title: "#FFFFFF", titleBg: "#000000" },
+  orange_schwarz: { name: "Orange/Schwarz", colA: "#F97316", colB: "#000000", colAText: "#000", colBText: "#FFF", title: "#FFFFFF", titleBg: "#F97316" },
+  lila_gelb: { name: "Lila/Gelb", colA: "#8B5CF6", colB: "#EAB308", colAText: "#FFF", colBText: "#000", title: "#FFFFFF", titleBg: "#8B5CF6" },
+};
+
+// âââ TEXT PARSER âââ
+function parseInput(text) {
+  const lines = text.trim().split("\n").map(l => l.trim()).filter(Boolean);
+  if (lines.length === 0) return { type: "empty", title: "", rows: [] };
+  const title = lines[0];
+  let subtitle = "";
+  let type = "list";
+  let colALabel = "";
+  let colBLabel = "";
+  const rows = [];
+  let startIdx = 1;
+  if (lines.length > 1 && /\bvs\.?\b/i.test(lines[1])) {
+    const parts = lines[1].split(/\s+vs\.?\s+/i);
+    if (parts.length === 2) { colALabel = parts[0].trim(); colBLabel = parts[1].trim(); type = "compare"; startIdx = 2; }
+  }
+  if (type === "list" && lines.length > 1 && !lines[1].includes("|") && !lines[1].includes(":")) { subtitle = lines[1]; startIdx = 2; }
+  for (let i = startIdx; i < lines.length; i++) {
+    const line = lines[i];
+    if (type === "compare" && line.includes("|")) {
+      const [labelPart, ...rest] = line.split(":");
+      if (rest.length > 0) {
+        const values = rest.join(":").split("|").map(s => s.trim());
+        rows.push({ center: labelPart.trim(), left: values[0] || "", right: values[1] || "" });
+      } else {
+        const [l, r] = line.split("|").map(s => s.trim());
+        rows.push({ center: "", left: l, right: r });
+      }
+    } else if (line.includes(":") || line.includes("|")) {
+      const sep = line.includes("|") ? "|" : ":";
+      const [label, ...valueParts] = line.split(sep);
+      rows.push({ label: label.trim(), value: valueParts.join(sep).trim() });
+      if (type !== "compare") type = "list";
+    } else {
+      rows.push({ label: line, value: "" });
+    }
+  }
+  return { type, title, subtitle, colALabel, colBLabel, rows };
+}
+
+// âââ EXAMPLES âââ
+const EXAMPLES = [
+  { name: "Berufsvergleich", color: "blau_gelb", text: "Berufsvergleich\nApotheker vs Facharzt\nEinkommen: 5.300\u20AC | 9.500\u20AC\nSteuern: 1.010\u20AC | 2.450\u20AC\nKrankenversicherung: 450\u20AC GKV | 450\u20AC PKV\nSozialabgaben: 610\u20AC | 890\u20AC\nArbeitszeit: 42Std | 55Std\nNetto: 3.230\u20AC | 5.710\u20AC" },
+  { name: "Rente Vergleich", color: "gelb_rot", text: "Wo ist die Rente besser?\nSchweden vs Deutschland\nEinkommen: 4.800\u20AC | 4.000\u20AC\nBeitragsjahre: 45 | 45\nBeitragssatz AN: 0% | 9,6%\nBeitragssatz AG: 23% | 9,6%\nRentenniveau: ~75% | 48%\nRente: 3.600\u20AC | 1.850\u20AC" },
+  { name: "Familie Vergleich", color: "gelb_rot", text: "Andere Zeiten?!\nFamilie 2026 vs Familie 1980\nArbeit: Beide Vollzeit | Ein Gehalt reicht\nEinkommen: Zwei Gehaelter | Ein Gehalt reicht\nWohnen: Kaum erreichbar | Eigenheim\nAuto: 2x Leasing | Eins gekauft\nFazit: Trotzdem knapp | Stabiles Leben" },
+  { name: "Investment Start", color: "schwarz_weiss", text: "01.01.2025\nWenn du 10.000\u20AC investiert haettest\nGold: 10.000\u20AC\nS&P 500: 10.000\u20AC\nCommerzbank: 10.000\u20AC\nSparbuch: 10.000\u20AC\nNVIDIA: 10.000\u20AC" },
+  { name: "Vermoegen Alter", color: "rot_weiss", text: "Vermoegen in DE\nTop 10% deiner Altersklasse?\n18 J.: 25.000\u20AC\n25 J.: 80.000\u20AC\n30 J.: 160.000\u20AC\n35 J.: 260.000\u20AC\n40 J.: 350.000\u20AC\n50 J.: 480.000\u20AC" },
+  { name: "Cash-Flow Rechner", color: "gelb_schwarz", text: "Cash-Flow einer Immobilie\nBeispiel: 3-Zimmer Leipzig\nKaltmiete: 750\u20AC\nHausgeld: -180\u20AC\nRuecklage: -50\u20AC\nZinsen: -320\u20AC\nTilgung: -150\u20AC\nSteuervorteil: +80\u20AC\nCash-Flow: +130\u20AC/Monat" },
+  { name: "Abo-Check", color: "lila_gelb", text: "Deine monatlichen Abos\nWas du wirklich brauchst\nNetflix: 13,99\u20AC\nSpotify: 10,99\u20AC\niCloud: 2,99\u20AC\nNews App: 9,99\u20AC\nGym: 29,99\u20AC\nHandy: 39,99\u20AC\nGesamt: 107,94\u20AC/Monat" },
+  { name: "Steuerlast", color: "rot_weiss", text: "So viel zahlst du wirklich\nSteuerlast in Deutschland\nBrutto: 5.000\u20AC\nLohnsteuer: -850\u20AC\nSoli: -47\u20AC\nKV: -375\u20AC\nRV: -465\u20AC\nAV: -65\u20AC\nPV: -85\u20AC\nNetto: 3.113\u20AC" },
+  { name: "Mieten vs Kaufen", color: "rot_weiss", text: "Mieten oder Kaufen?\nMieter vs Kaeufer\nMonatlich: 1.200\u20AC Miete | 1.400\u20AC Rate\nNach 10 J.: 0\u20AC | 80.000\u20AC Equity\nNach 30 J.: 0\u20AC | 350.000\u20AC Eigentum\nFlexibilitaet: Hoch | Gering\nFazit: Bequem aber teuer | Vermoegen aufgebaut" },
+  { name: "GmbH vs Einzelunt.", color: "blau_rot", text: "Rechtsform Vergleich\nGmbH vs Einzelunternehmer\nHaftung: Beschraenkt | Unbeschraenkt\nGruendungskosten: ~1.000\u20AC | 0\u20AC\nSteuerlast: ~30% | bis 45%\nBuchhaltung: Doppelt | Einfach\nImage: Professionell | Weniger serioes\nVerkauf moeglich: Ja | Schwierig" },
+];
+
+// âââ AI SYSTEM PROMPT âââ
+const AI_SYSTEM_PROMPT = "Du bist ein Assistent fuer einen Social-Media Reel/Story-Editor. Generiere strukturierten Text. Erste Zeile: Titel. Fuer Vergleiche: Zweite Zeile: A vs B, dann Label: WertA | WertB. Fuer Listen: Label: Wert. Max 7-8 Zeilen. Kurze Texte. Antworte NUR mit formatiertem Text.";
+
+// âââ HELPER: Create Creative âââ
+function createCreative(overrides) {
+  const ex = overrides && overrides.text ? null : pickRandom(EXAMPLES);
+  return {
+    id: uid(),
+    inputText: (overrides && overrides.text) || (ex ? ex.text : EXAMPLES[0].text),
+    colorPreset: (overrides && overrides.color) || (ex ? ex.color : "blau_gelb"),
+    bgImage: (overrides && overrides.bgImage) || null,
+    bgIsVideo: (overrides && overrides.bgIsVideo) || false,
+    overlay: { enabled: true, hex: "#0B1222", opacity: 55 },
+    textScale: 100,
+    textOffsetY: 0,
+    colorOverrides: {},
+    showBoxBackgrounds: true,
+    selected: true,
+  };
+}
+
+// âââ STYLE TOKENS âââ
+const C = {
+  bg: "#0B0D12", panel: "#0D0F14", card: "rgba(255,255,255,0.025)",
+  border: "rgba(255,255,255,0.06)", accent: "#6C63FF",
+  accentBg: "rgba(108,99,255,0.12)", accentText: "#A9A3FF",
+  text: "#fff", dim: "rgba(255,255,255,0.4)", muted: "rgba(255,255,255,0.2)",
+  danger: "#E50914", success: "#22C55E",
+};
+const sec = { marginBottom: "10px", padding: "10px", background: C.card, borderRadius: "8px", border: "1px solid " + C.border };
+const lab = { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "10px", color: C.dim, marginBottom: "4px", fontFamily: "monospace", textTransform: "uppercase", letterSpacing: "0.5px" };
+const rng = { width: "100%", accentColor: C.accent, cursor: "pointer", height: "3px" };
+const abtn = { padding: "5px 10px", fontSize: "10px", background: C.accentBg, border: "1px solid rgba(108,99,255,0.2)", borderRadius: "5px", color: C.accentText, cursor: "pointer", fontFamily: "monospace" };
+
+// âââ LABEL BOX âââ
 function LB(props) {
   var bg = props.bg || "transparent";
   var color = props.color || "#fff";
@@ -19,7 +129,7 @@ function LB(props) {
   );
 }
 
-// ━━━ RENDERERS ━━━
+// âââ RENDERERS âââ
 function RenderCompare(props) {
   var creative = props.creative;
   var parsed = parseInput(creative.inputText);
@@ -83,7 +193,7 @@ function AutoRenderer(props) {
   return <RenderList creative={props.creative} />;
 }
 
-// ━━━ CANVAS COMPONENT (used for preview + export) ━━━
+// âââ CANVAS COMPONENT (used for preview + export) âââ
 function CanvasView(props) {
   var creative = props.creative;
   var scale = props.scale || 0.38;
@@ -118,7 +228,7 @@ function CanvasView(props) {
   );
 }
 
-// ━━━ FILMSTRIP THUMBNAIL ━━━
+// âââ FILMSTRIP THUMBNAIL âââ
 function Thumb(props) {
   var c = props.creative;
   var isActive = props.isActive;
@@ -154,7 +264,7 @@ function Thumb(props) {
   );
 }
 
-// ━━━ STEP 1: IMPORT PANEL ━━━
+// âââ STEP 1: IMPORT PANEL âââ
 function ImportPanel(props) {
   var creatives = props.creatives;
   var setCreatives = props.setCreatives;
@@ -164,15 +274,7 @@ function ImportPanel(props) {
   var bulkTextRef = useRef("");
   var _ft = useState(""); var bulkText = _ft[0]; var setBulkText = _ft[1];
   var _sb = useState(false); var showBulk = _sb[0]; var setShowBulk = _sb[1];
-  var _prov = useState("openai");
-  var selectedProvider = _prov[0]; var setSelectedProvider = _prov[1];
-  var _mod = useState("gpt-4o-mini");
-  var selectedModel = _mod[0]; var setSelectedModel = _mod[1];
   var _ak = useState(function() { return localStorage.getItem("openai_key") || ""; }); var apiKey = _ak[0]; var setApiKey = _ak[1];
-  var _ak2 = useState(function() { return localStorage.getItem("anthropic_key") || ""; });
-  var anthropicKey = _ak2[0]; var setAnthropicKey = _ak2[1];
-  var _ak3 = useState(function() { return localStorage.getItem("gemini_key") || ""; });
-  var geminiKey = _ak3[0]; var setGeminiKey = _ak3[1];
   var _pr = useState(""); var prompt = _pr[0]; var setPrompt = _pr[1];
   var _al = useState(false); var aiLoading = _al[0]; var setAiLoading = _al[1];
   var _ac = useState(5); var aiCount = _ac[0]; var setAiCount = _ac[1];
@@ -186,8 +288,6 @@ function ImportPanel(props) {
   var _tod = useState({ done: 0, total: 0 }); var toBatchState = _tod[0]; var setToBatchState = _tod[1];
 
   useEffect(function() { if (apiKey) localStorage.setItem("openai_key", apiKey); }, [apiKey]);
-  useEffect(function() { if (anthropicKey) localStorage.setItem("anthropic_key", anthropicKey); }, [anthropicKey]);
-  useEffect(function() { if (geminiKey) localStorage.setItem("gemini_key", geminiKey); }, [geminiKey]);
 
   var addFromTemplate = function(ex) {
     var c = createCreative({ text: ex.text, color: ex.color });
@@ -217,17 +317,14 @@ function ImportPanel(props) {
     });
   };
 
-    var handleAiGenerate = function() {
-    var activeKey = selectedProvider === "anthropic" ? anthropicKey : selectedProvider === "gemini" ? geminiKey : apiKey;
-    if (!activeKey.trim() || !prompt.trim()) return;
+  var handleAiGenerate = function() {
+    if (!apiKey.trim() || !prompt.trim()) return;
     setAiLoading(true);
-    fetch("/api/generate", {
+    fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + apiKey.trim() },
       body: JSON.stringify({
-        apiKey: activeKey.trim(),
-        provider: selectedProvider,
-        model: selectedModel,
+        model: "gpt-4o-mini", temperature: 0.8, max_tokens: 2000,
         messages: [
           { role: "system", content: AI_SYSTEM_PROMPT + " Generiere genau " + aiCount + " verschiedene Posts. Trenne sie mit --- auf einer eigenen Zeile." },
           { role: "user", content: prompt },
@@ -247,30 +344,36 @@ function ImportPanel(props) {
     .finally(function() { setAiLoading(false); });
   };
 
-    var handleTextOnlyGenerate = function() {
-    var activeKey = selectedProvider === "anthropic" ? anthropicKey : selectedProvider === "gemini" ? geminiKey : apiKey;
-    if (!activeKey.trim()) { alert("Bitte API-Key eingeben."); return; }
+  var handleTextOnlyGenerate = function() {
+    if (!apiKey.trim()) { alert("Bitte OpenAI API-Key eingeben."); return; }
     var total = Math.max(1, Math.min(200, toCount));
     var batchSize = 5;
     var batches = Math.ceil(total / batchSize);
     var allCreated = 0;
     setToProgress(true);
     setToBatchState({ done: 0, total: total });
+
     var runBatch = function(batchIndex) {
-      if (batchIndex >= batches) { setToProgress(false); return; }
+      if (batchIndex >= batches) {
+        setToProgress(false);
+        return;
+      }
       var thisSize = Math.min(batchSize, total - allCreated);
       var topicsHint = toTopics.trim() ? ("Themen (bevorzuge diese): " + toTopics + ". ") : "";
       var styleHint = toStyle.trim() ? ("Stil: " + toStyle + ". ") : "";
       var toneHint = toTone.trim() ? ("Ton: " + toTone + ". ") : "";
-      var sysMsg = "Du bist ein Experte fuer inspirierende, motivierende und informative Social-Media-Grafiktexte. Erstelle kurze, kraftvolle Texte fuer Reels und Story-Grafiken. Jede Grafik besteht aus: THEMA: [Thema]\nTITEL: [kurzer Haupttext, max 8 Woerter]\nSUBTITEL: [ergaenzender Satz, max 12 Woerter]\nTrenne die Grafiken mit ---";
-      var userMsg = topicsHint + styleHint + toneHint + "Erstelle genau " + thisSize + " verschiedene Text-Grafiken. Variiere die Themen stark.";
-      fetch("/api/generate", {
+      var sysMsg = "Du bist ein Experte fuer inspirierende, motivierende und informative Social-Media-Grafiktexte. " +
+        "Erstelle kurze, kraftvolle Texte fuer Reels und Story-Grafiken. " +
+        "Jede Grafik besteht aus: THEMA: [Thema]\nTITEL: [kurzer Haupttext, max 8 Woerter]\nSUBTITEL: [ergaenzender Satz, max 12 Woerter]\n" +
+        "Trenne die Grafiken mit ---";
+      var userMsg = topicsHint + styleHint + toneHint +
+        "Erstelle genau " + thisSize + " verschiedene Text-Grafiken. Variiere die Themen stark.";
+
+      fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + apiKey.trim() },
         body: JSON.stringify({
-          apiKey: activeKey.trim(),
-          provider: selectedProvider,
-          model: selectedModel,
+          model: "gpt-4o-mini", temperature: 0.9, max_tokens: 1500,
           messages: [
             { role: "system", content: sysMsg },
             { role: "user", content: userMsg },
@@ -283,14 +386,16 @@ function ImportPanel(props) {
           var parts = generated.trim().split("---").map(function(p) { return p.trim(); }).filter(Boolean);
           var colorKeys = Object.keys(COLOR_PRESETS);
           var newC = parts.map(function(rawText) {
-            var tlines = rawText.split("\n").map(function(l) { return l.trim(); }).filter(Boolean);
-            var topic = ""; var title = ""; var subtitle = "";
-            tlines.forEach(function(l) {
+            var lines = rawText.split("\n").map(function(l) { return l.trim(); }).filter(Boolean);
+            var topic = "";
+            var title = "";
+            var subtitle = "";
+            lines.forEach(function(l) {
               if (l.startsWith("THEMA:")) topic = l.replace("THEMA:", "").trim();
               else if (l.startsWith("TITEL:")) title = l.replace("TITEL:", "").trim();
               else if (l.startsWith("SUBTITEL:")) subtitle = l.replace("SUBTITEL:", "").trim();
             });
-            var combined = (title || tlines[0] || "Text") + (subtitle ? "\n" + subtitle : "") + (topic ? "\n\nThema: " + topic : "");
+            var combined = (title || lines[0] || "Text") + (subtitle ? "\n" + subtitle : "") + (topic ? "\n\nThema: " + topic : "");
             return createCreative({ text: combined, color: pickRandom(colorKeys), bgImage: null, bgIsVideo: false });
           });
           setCreatives(function(prev) { return prev.concat(newC); });
@@ -299,8 +404,12 @@ function ImportPanel(props) {
           if (newC.length > 0 && batchIndex === 0) setActiveId(newC[0].id);
         }
         runBatch(batchIndex + 1);
-      }).catch(function(e) { alert("KI-Fehler: " + e.message); setToProgress(false); });
+      }).catch(function(e) {
+        alert("KI-Fehler: " + e.message);
+        setToProgress(false);
+      });
     };
+
     runBatch(0);
   };
 
@@ -320,14 +429,14 @@ function ImportPanel(props) {
           </p>
         </div>
 
-        {/* ━━━ PROJEKT-TYP AUSWAHL ━━━ */}
+        {/* âââ PROJEKT-TYP AUSWAHL âââ */}
         <div style={Object.assign({}, sec, { padding: "16px", marginBottom: "16px" })}>
           <div style={Object.assign({}, lab, { marginBottom: "12px" })}><span>Projekt-Typ waehlen</span></div>
           <div style={{ display: "flex", gap: "10px" }}>
             {[
-              { id: "video", label: "Video", icon: "🎬", desc: "Hintergrundvideo + Text" },
-              { id: "image", label: "Bild + Text", icon: "🖼️", desc: "Bild als Hintergrund" },
-              { id: "textonly", label: "Text Only", icon: "✨", desc: "Grafikvorlagen generieren" },
+              { id: "video", label: "Video", icon: "ð¬", desc: "Hintergrundvideo + Text" },
+              { id: "image", label: "Bild + Text", icon: "ð¼ï¸", desc: "Bild als Hintergrund" },
+              { id: "textonly", label: "Text Only", icon: "â¨", desc: "Grafikvorlagen generieren" },
             ].map(function(pt) {
               var active = projectType === pt.id;
               return (
@@ -347,62 +456,20 @@ function ImportPanel(props) {
           </div>
         </div>
 
-        {/* ━━━ TEXT ONLY: GRAFIKGENERATOR ━━━ */}
+        {/* âââ TEXT ONLY: GRAFIKGENERATOR âââ */}
         {projectType === "textonly" && (
           <div style={Object.assign({}, sec, { padding: "20px", border: "1px solid rgba(108,99,255,0.3)", background: "rgba(108,99,255,0.06)" })}>
-            <div style={Object.assign({}, lab, { marginBottom: "14px" })}><span>✨ Text Only Grafikgenerator</span></div>
+            <div style={Object.assign({}, lab, { marginBottom: "14px" })}><span>â¨ Text Only Grafikgenerator</span></div>
 
-            {/* Provider + Model + API Key */}
-            <div style={{ marginBottom: "12px" }}>
-              <div style={{ color: C.dim, fontSize: "11px", fontFamily: "monospace", marginBottom: "6px" }}>KI-ANBIETER</div>
-              <div style={{ display: "flex", gap: "6px", marginBottom: "8px" }}>
-                {Object.entries(AI_PROVIDERS).map(function(entry) {
-                  var pk = entry[0]; var pv = entry[1];
-                  var active = selectedProvider === pk;
-                  return (
-                    <button key={pk} onClick={function() {
-                      setSelectedProvider(pk);
-                      setSelectedModel(pv.models[0]);
-                    }} style={{
-                      flex: 1, padding: "8px 4px", borderRadius: "6px", cursor: "pointer",
-                      border: active ? "2px solid " + C.accent : "1px solid " + C.border,
-                      background: active ? C.accentBg : C.card,
-                      color: active ? C.accentText : C.dim,
-                      fontFamily: "system-ui", fontSize: "11px", fontWeight: active ? 700 : 400, textAlign: "center",
-                    }}>
-                      <div style={{ fontSize: "16px" }}>{pv.icon}</div>
-                      <div>{pv.name}</div>
-                    </button>
-                  );
-                })}
-              </div>
-              <div style={{ color: C.dim, fontSize: "11px", fontFamily: "monospace", marginBottom: "4px" }}>MODELL</div>
-              <select value={selectedModel} onChange={function(e) { setSelectedModel(e.target.value); }} style={{
-                width: "100%", padding: "7px 10px", background: "rgba(255,255,255,0.04)",
-                border: "1px solid " + C.border, borderRadius: "6px", color: "#fff", fontSize: "12px",
-                fontFamily: "monospace", boxSizing: "border-box",
-              }}>
-                {AI_PROVIDERS[selectedProvider].models.map(function(m) {
-                  return <option key={m} value={m}>{m}</option>;
-                })}
-              </select>
-            </div>
             {/* API Key */}
             <div style={{ marginBottom: "12px" }}>
-              <div style={{ color: C.dim, fontSize: "11px", fontFamily: "monospace", marginBottom: "4px" }}>{AI_PROVIDERS[selectedProvider].keyLabel}</div>
-              <input type="password"
-                value={selectedProvider === "anthropic" ? anthropicKey : selectedProvider === "gemini" ? geminiKey : apiKey}
-                onChange={function(e) {
-                  if (selectedProvider === "anthropic") setAnthropicKey(e.target.value);
-                  else if (selectedProvider === "gemini") setGeminiKey(e.target.value);
-                  else setApiKey(e.target.value);
-                }}
-                placeholder={AI_PROVIDERS[selectedProvider].keyPlaceholder}
-                style={{
-                  width: "100%", padding: "8px 10px", background: "rgba(255,255,255,0.04)", border: "1px solid " + C.border,
-                  borderRadius: "6px", color: "#fff", fontSize: "12px", fontFamily: "monospace", boxSizing: "border-box",
-                }} />
+              <div style={{ color: C.dim, fontSize: "11px", fontFamily: "monospace", marginBottom: "4px" }}>OPENAI API-KEY</div>
+              <input type="password" value={apiKey} onChange={function(e) { setApiKey(e.target.value); }} placeholder="sk-..." style={{
+                width: "100%", padding: "8px 10px", background: "rgba(255,255,255,0.04)", border: "1px solid " + C.border,
+                borderRadius: "6px", color: "#fff", fontSize: "12px", fontFamily: "monospace", boxSizing: "border-box",
+              }} />
             </div>
+
             {/* Anzahl + Themen Grid */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "12px", marginBottom: "12px" }}>
               <div>
@@ -458,11 +525,11 @@ function ImportPanel(props) {
               border: "none", borderRadius: "8px", color: "#fff", cursor: toProgress ? "not-allowed" : "pointer",
               fontFamily: "system-ui", letterSpacing: "0.5px",
             }}>
-              {toProgress ? ("⏳ Generiere... (" + toBatchState.done + "/" + toBatchState.total + ")") : ("✨ " + toCount + " Grafikvorlagen generieren")}
+              {toProgress ? ("â³ Generiere... (" + toBatchState.done + "/" + toBatchState.total + ")") : ("â¨ " + toCount + " Grafikvorlagen generieren")}
             </button>
 
             <div style={{ marginTop: "10px", color: C.muted, fontSize: "10px", fontFamily: "monospace", textAlign: "center" }}>
-              Automatische Batch-Generierung • 5 Grafiken pro API-Aufruf • Alle vollst. editierbar
+              Automatische Batch-Generierung â¢ 5 Grafiken pro API-Aufruf â¢ Alle vollst. editierbar
             </div>
           </div>
         )}
@@ -608,7 +675,7 @@ function ImportPanel(props) {
   );
 }
 
-// ━━━ STEP 2: EDIT PANEL ━━━
+// âââ STEP 2: EDIT PANEL âââ
 function EditPanel(props) {
   var creatives = props.creatives;
   var setCreatives = props.setCreatives;
@@ -829,7 +896,7 @@ function EditPanel(props) {
   );
 }
 
-// ━━━ STEP 3: EXPORT PANEL ━━━
+// âââ STEP 3: EXPORT PANEL âââ
 function ExportPanel(props) {
   var creatives = props.creatives;
   var setCreatives = props.setCreatives;
@@ -955,7 +1022,7 @@ function ExportPanel(props) {
           <button onClick={deselectAll} style={abtn}>Keine</button>
           <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer", userSelect: "none" }}>
             <input type="checkbox" checked={use4KExport} onChange={function(e) { setUse4KExport(e.target.checked); }} style={{ width: "16px", height: "16px", cursor: "pointer", accentColor: "#6c63ff" }} />
-            <span style={{ color: use4KExport ? "#6c63ff" : "#aaa", fontSize: "12px", fontWeight: 600, fontFamily: "system-ui", whiteSpace: "nowrap" }}>2160×3840 (4K)</span>
+            <span style={{ color: use4KExport ? "#6c63ff" : "#aaa", fontSize: "12px", fontWeight: 600, fontFamily: "system-ui", whiteSpace: "nowrap" }}>2160Ã3840 (4K)</span>
           </label>
           <button onClick={handleBulkExport} disabled={exporting || selectedCount === 0} style={{
             padding: "10px 28px", fontSize: "13px", fontWeight: 700,
@@ -1052,7 +1119,7 @@ function ExportPanel(props) {
   );
 }
 
-// ━━━ MAIN APP ━━━
+// âââ MAIN APP âââ
 export default function App() {
   var _st = useState("import"); var step = _st[0]; var setStep = _st[1];
   var _cr = useState([]); var creatives = _cr[0]; var setCreatives = _cr[1];
