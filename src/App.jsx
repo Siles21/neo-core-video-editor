@@ -245,7 +245,7 @@ function Thumb(props) {
       <div style={{
         transform: "scale(0.069)", transformOrigin: "top left",
         width: "1080px", height: "1920px",
-        background: c.bgImage ? "transparent" : "#000", position: "relative",
+        background: "transparent", position: "relative",
       }}>
         {c.bgImage && !c.bgIsVideo ? <img src={c.bgImage} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} alt="" /> : null}
         {c.overlay.enabled ? <div style={{ position: "absolute", inset: 0, backgroundColor: hexToRgba(c.overlay.hex, c.overlay.opacity) }} /> : null}
@@ -649,7 +649,7 @@ function ImportPanel(props) {
                     border: "1px solid " + C.border, position: "relative", flexShrink: 0,
                   }}>
                     <div style={{ transform: "scale(0.074)", transformOrigin: "top left", width: "1080px", height: "1920px",
-                      background: c.bgImage ? "transparent" : "#000", position: "relative" }}>
+                      background: "transparent", position: "relative" }}>
                       {c.bgImage && !c.bgIsVideo ? <img src={c.bgImage} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} alt="" /> : null}
                       {c.overlay.enabled ? <div style={{ position: "absolute", inset: 0, backgroundColor: hexToRgba(c.overlay.hex, c.overlay.opacity) }} /> : null}
                       <div style={{ position: "relative", zIndex: 2, width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "center",
@@ -937,7 +937,7 @@ function ExportPanel(props) {
           scale: use4KExport ? (3840 / (el.offsetHeight || el.getBoundingClientRect().height)) : 1,
           useCORS: true,
           allowTaint: true,
-          backgroundColor: '#000000'
+          backgroundColor: null
         }).then(function(canvas) {
           el.style.transform = savedTransform;
           el.style.transformOrigin = savedTransformOrigin;
@@ -1087,7 +1087,7 @@ function ExportPanel(props) {
                   style={{
                     transform: "scale(0.148)", transformOrigin: "top left",
                     width: "1080px", height: "1920px",
-                    background: c.bgImage ? "transparent" : "#000", position: "absolute", top: 0, left: 0,
+                    background: "transparent", position: "absolute", top: 0, left: 0,
                   }}>
                   {c.bgImage && !c.bgIsVideo ? <img src={c.bgImage} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} alt="" /> : null}
                   {c.bgImage && c.bgIsVideo ? <video src={c.bgImage} muted loop autoPlay playsInline style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} /> : null}
