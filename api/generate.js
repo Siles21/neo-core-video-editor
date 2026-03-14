@@ -1,99 +1,43 @@
 export default async function handler(req, res) {
-      if (req.method !== 'POST') {
-              return res.status(405).json({ error: 'Method not allowed' });
-      }
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
 
-  const { apiKey, messages, model, provider } = req.body;
+  const { messages, model } = req.body || {};
+  if (!messages || !Array.isArray(messages) || messages.length === 0) {
+    return res.status(400).json({ error: "Messages required" });
+  }
 
+  const apiKey = process.env.GOOGLE_API_KEY;
   if (!apiKey) {
-          return res.status(400).json({ error: 'API key is required' });
+    return res.status(500).json({ error: "Missing GOOGLE_API_KEY" });
   }
 
-  const detectedProvider = provider || detectProvider(model);
+  const useModel = model || "gemini-1.5-flash";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${useModel}:generateContent`;
 
-  try {
-          let response;
+  const contents = messages.map((m) => {
+    const role = m.role === "assistant" ? "model" : m.role === "system" ? "user" : m.role;
+    return { role, parts: [{ text: m.content || "" }] };
+  });
 
-        if (detectedProvider === 'anthropic') {
-                  response = await fetch('https://api.anthropic.com/v1/messages', {
-                              method: 'POST',
-                              headers: {
-                                            'Content-Type': 'application/json',
-                                            'x-api-key': apiKey,
-                                            'anthropic-version': '2023-06-01',
-                              },
-                              body: JSON.stringify({
-                                            model: model || 'claude-3-5-haiku-20241022',
-                                            max_tokens: 2000,
-                                            messages: messages.filter(m => m.role !== 'system'),
-                                            system: messages.find(m => m.role === 'system')?.content || '',
-                              }),
-                  });
-                  const data = await response.json();
-                  if (!response.ok) return res.status(response.status).json(data);
-                  return res.status(200).json({
-                              choices: [{
-                                            message: {
-                                                            role: 'assistant',
-                                                            content: data.content?.[0]?.text || '',
-                                            }
-                              }]
-                  });
+  const payload = { contents };
 
-        } else if (detectedProvider === 'gemini') {
-                  const geminiModel = model || 'gemini-1.5-flash';
-                  const systemMsg = messages.find(m => m.role === 'system')?.content || '';
-                  const userMessages = messages.filter(m => m.role !== 'system');
-                  const geminiContents = userMessages.map(m => ({
-                              role: m.role === 'assistant' ? 'model' : 'user',
-                              parts: [{ text: m.content }],
-                  }));
-                  response = await fetch(
-                              `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`,
-                      {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({
-                                                    systemInstruction: systemMsg ? { parts: [{ text: systemMsg }] } : undefined,
-                                                    contents: geminiContents,
-                                                    generationConfig: { temperature: 0.9, maxOutputTokens: 2000 },
-                                    }),
-                      }
-                            );
-                  const data = await response.json();
-                  if (!response.ok) return res.status(response.status).json(data);
-                  return res.status(200).json({
-                              choices: [{
-                                            message: {
-                                                            role: 'assistant',
-                                                            content: data.candidates?.[0]?.content?.parts?.[0]?.text || '',
-                                            }
-                              }]
-                  });
+  const response = await fetch(url + `?key=${encodeURIComponent(apiKey)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 
-        } else {
-                  // Default: OpenAI (and OpenAI-compatible APIs)
-            response = await fetch('https://api.openai.com/v1/chat/completions', {
-                        method: 'POST',
-                        headers: {
-                                      'Content-Type': 'application/json',
-                                      'Authorization': `Bearer ${apiKey}`,
-                        },
-                        body: JSON.stringify({
-                                      model: model || 'gpt-4o-mini',
-                                      messages: messages,
-                        }),
-            });
-                  const data = await response.json();
-                  if (!response.ok) return res.status(response.status).json(data);
-                  return res.status(200).json(data);
-        }
-
-  } catch (error) {
-          return res.status(500).json({ error: 'Failed to connect to AI provider', details: error.message });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    return res.status(response.status).json({ error: data?.error?.message || "Gemini error" });
   }
+
+  const text = (data?.candidates?.[0]?.content?.parts || [])
+    .map((p) => p.text || "")
+    .join("\n")
+    .trim();
+
+  return res.status(200).json({ text });
 }
-
-function detectProvider(model) {
-      if (!model) return 'openai';
-      if (model.startsWith('claude')) return 'anthr
