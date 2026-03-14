@@ -8,7 +8,7 @@ function hexToRgba(hex, op) {
 function pickRandom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 
-// âââ COLOR PRESETS âââ
+// âââ  const ProjectType = {   VIDEO: "video",   IMAGE: "image",   TEXT_ONLY: "text-only", };  const ProjectTypeConfig = {   [ProjectType.VIDEO]: { editorMode: "timeline", allowUpload: true, allowTemplates: true, allowAiGenerator: true, allowEmptyCreative: true },   [ProjectType.IMAGE]: { editorMode: "image", allowUpload: true, allowTemplates: true, allowAiGenerator: false, allowEmptyCreative: true },   [ProjectType.TEXT_ONLY]: { editorMode: "timeline", allowUpload: false, allowTemplates: true, allowAiGenerator: true, allowEmptyCreative: true }, };  // âââ  const ProjectType = {   VIDEO: "video",   IMAGE: "image",   TEXT_ONLY: "text-only", };  const ProjectTypeConfig = {   [ProjectType.VIDEO]: { editorMode: "timeline", allowUpload: true, allowTemplates: true, allowAiGenerator: true, allowEmptyCreative: true },   [ProjectType.IMAGE]: { editorMode: "image", allowUpload: true, allowTemplates: true, allowAiGenerator: false, allowEmptyCreative: true },   [ProjectType.TEXT_ONLY]: { editorMode: "timeline", allowUpload: false, allowTemplates: true, allowAiGenerator: true, allowEmptyCreative: true }, };  // âââ COLOR PRESETS âââ âââ âââ
 const COLOR_PRESETS = {
   blau_gelb: { name: "Blau/Gelb", colA: "#3B82F6", colB: "#EAB308", colAText: "#FFF", colBText: "#000", title: "#000000", titleBg: "#FFFFFF" },
   gruen_rot: { name: "GrÃ¼n/Rot", colA: "#22C55E", colB: "#E50914", colAText: "#000", colBText: "#FFF", title: "#FFFFFF", titleBg: "#000000" },
