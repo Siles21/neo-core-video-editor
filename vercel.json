@@ -1,7 +1,7 @@
 {
     "headers": [
         {
-            "source": "/(.*)",
+            "source": "/((?!api/).*)",
             "headers": [
                 {
                     "key": "Cross-Origin-Opener-Policy",
@@ -13,5 +13,10 @@
                 }
             ]
         }
-    ]
+    ],
+    "functions": {
+        "api/worker/sync.js": {
+            "maxDuration": 60
+        }
+    }
 }

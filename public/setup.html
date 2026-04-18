@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dropbox → Canva Auto-Sync · Setup</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      background: #0f0f12; color: #eaeaea; margin: 0; padding: 2rem;
+      max-width: 720px; margin-inline: auto;
+    }
+    h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+    .sub { color: #8a8a94; margin-bottom: 2rem; }
+    section { background: #17171c; border: 1px solid #26262e; border-radius: 10px; padding: 1.25rem; margin-bottom: 1rem; }
+    section h2 { margin: 0 0 0.75rem; font-size: 1rem; color: #d0d0d8; }
+    label { display: block; font-size: 0.85rem; color: #a0a0ac; margin-top: 0.75rem; margin-bottom: 0.25rem; }
+    input, select, textarea {
+      width: 100%; box-sizing: border-box;
+      background: #0f0f12; color: #eaeaea;
+      border: 1px solid #2c2c36; border-radius: 6px;
+      padding: 0.5rem 0.6rem; font-size: 0.9rem;
+    }
+    button {
+      background: #4a7dff; color: white; border: 0; border-radius: 6px;
+      padding: 0.55rem 1rem; font-size: 0.9rem; cursor: pointer; margin-right: 0.5rem;
+    }
+    button.secondary { background: #2c2c36; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .row { display: flex; gap: 0.5rem; align-items: center; }
+    .status { font-size: 0.85rem; color: #8a8a94; }
+    .status.ok { color: #5dd37e; }
+    .status.bad { color: #ff7070; }
+    .info { background: #1a1f2e; border-left: 3px solid #4a7dff; padding: 0.75rem 1rem; border-radius: 4px; font-size: 0.85rem; margin-top: 0.75rem; }
+    code { background: #0a0a0e; padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.85em; }
+    #mapping-rows > div { display: grid; grid-template-columns: 1fr 1fr auto; gap: 0.5rem; margin-bottom: 0.4rem; }
+    .hidden { display: none; }
+    .log { background: #0a0a0e; border-radius: 6px; padding: 0.75rem; font-family: ui-monospace, monospace; font-size: 0.8rem; white-space: pre-wrap; max-height: 240px; overflow: auto; }
+  </style>
+</head>
+<body>
+  <h1>Dropbox → Canva Auto-Sync</h1>
+  <p class="sub">Einmalige Einrichtung. Danach landet jedes neue Video in Dropbox automatisch als Canva-Design.</p>
+
+  <section id="auth-section">
+    <h2>1 · Admin-Passwort</h2>
+    <label>Passwort <small style="color:#666">(aus ENV: <code>ADMIN_PASSWORD</code>)</small></label>
+    <input type="password" id="admin-password" autocomplete="off">
+    <div style="margin-top:0.75rem">
+      <button id="btn-unlock">Entsperren</button>
+      <span id="auth-status" class="status"></span>
+    </div>
+  </section>
+
+  <div id="main" class="hidden">
+    <section>
+      <h2>2 · Konten verbinden</h2>
+      <div class="row">
+        <button class="secondary" id="btn-canva">Canva verbinden</button>
+        <span id="canva-status" class="status">—</span>
+      </div>
+      <div class="row" style="margin-top:0.5rem">
+        <button class="secondary" id="btn-dropbox">Dropbox verbinden</button>
+        <span id="dropbox-status" class="status">—</span>
+      </div>
+    </section>
+
+    <section>
+      <h2>3 · Brand Template & Ordner</h2>
+      <label>Brand Template</label>
+      <select id="brand-template"><option value="">— laden —</option></select>
+
+      <label>Canva-Zielordner (= „Projekt")</label>
+      <select id="canva-folder"><option value="">— laden —</option></select>
+
+      <button class="secondary" id="btn-reload" style="margin-top:0.5rem">Listen neu laden</button>
+    </section>
+
+    <section>
+      <h2>4 · Dropbox-Ordner</h2>
+      <label>Pfad im Dropbox-Team (z. B. <code>/team-videos</code>)</label>
+      <input type="text" id="dropbox-path" placeholder="/team-videos">
+    </section>
+
+    <section>
+      <h2>5 · Feld-Mapping (Presets)</h2>
+      <p class="sub" style="font-size:0.85rem">Jedes Template-Feld wird aus einer Quelle gefüllt: <code>videofile</code>, <code>filename</code> oder <code>static:&lt;text&gt;</code>.</p>
+      <div id="mapping-rows"></div>
+      <button class="secondary" id="btn-add-mapping">Feld hinzufügen</button>
+    </section>
+
+    <section>
+      <h2>6 · Speichern</h2>
+      <label><input type="checkbox" id="init-cursor" checked style="width:auto;margin-right:0.4rem"> Cursor auf „jetzt" setzen (Bestand nicht rückwirkend syncen)</label>
+      <div style="margin-top:0.75rem">
+        <button id="btn-save">Speichern</button>
+        <button class="secondary" id="btn-test">Jetzt manuell syncen</button>
+        <span id="save-status" class="status"></span>
+      </div>
+      <div class="info">
+        Nach dem Speichern: trage diese Webhook-URL in der <a href="https://www.dropbox.com/developers/apps" target="_blank" style="color:#8fb0ff">Dropbox App Console</a> ein:
+        <br><code id="webhook-url">…</code>
+      </div>
+      <div id="log" class="log hidden"></div>
+    </section>
+  </div>
+
+<script>
+let adminPassword = "";
+
+function $(id) { return document.getElementById(id); }
+
+async function apiFetch(path, options = {}) {
+  const res = await fetch(path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      "x-admin-password": adminPassword,
+      ...(options.headers || {}),
+    },
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+  return json;
+}
+
+function setStatus(el, text, cls) {
+  el.textContent = text;
+  el.className = "status" + (cls ? " " + cls : "");
+}
+
+async function refreshStatus() {
+  const { status, config } = await apiFetch("/api/config");
+  setStatus($("canva-status"), status.canvaConnected ? "verbunden" : "nicht verbunden", status.canvaConnected ? "ok" : "bad");
+  setStatus($("dropbox-status"), status.dropboxConnected ? "verbunden" : "nicht verbunden", status.dropboxConnected ? "ok" : "bad");
+  if (config) {
+    if (config.dropboxPath) $("dropbox-path").value = config.dropboxPath;
+    if (config.brandTemplateId) $("brand-template").dataset.pending = config.brandTemplateId;
+    if (config.canvaFolderId) $("canva-folder").dataset.pending = config.canvaFolderId;
+    if (config.fieldMapping) renderMapping(config.fieldMapping);
+  }
+  $("webhook-url").textContent = `${location.origin}/api/dropbox/webhook`;
+}
+
+async function loadCanvaLists() {
+  try {
+    const templates = await apiFetch("/api/canva/brand-templates");
+    fillSelect($("brand-template"), templates.items || templates.brand_templates || [], "id", "title");
+    const folders = await apiFetch("/api/canva/folders");
+    fillSelect($("canva-folder"), folders.items || folders.folders || [], "id", "name");
+  } catch (e) {
+    console.warn("Canva lists:", e.message);
+  }
+}
+
+function fillSelect(select, items, valueKey, labelKey) {
+  const pending = select.dataset.pending || "";
+  select.innerHTML = '<option value="">— wählen —</option>';
+  for (const item of items) {
+    const opt = document.createElement("option");
+    opt.value = item[valueKey] || item.id || "";
+    opt.textContent = item[labelKey] || item.title || item.name || opt.value;
+    if (opt.value === pending) opt.selected = true;
+    select.appendChild(opt);
+  }
+}
+
+function renderMapping(mapping) {
+  const rows = $("mapping-rows");
+  rows.innerHTML = "";
+  const entries = Object.entries(mapping || {});
+  if (entries.length === 0) addMappingRow("", "videofile");
+  else entries.forEach(([k, v]) => addMappingRow(k, v));
+}
+
+function addMappingRow(field = "", source = "filename") {
+  const rows = $("mapping-rows");
+  const row = document.createElement("div");
+  row.innerHTML = `
+    <input type="text" placeholder="Template-Feldname" value="${field}">
+    <input type="text" placeholder="videofile | filename | static:TEXT" value="${source}">
+    <button class="secondary" type="button">×</button>
+  `;
+  row.querySelector("button").addEventListener("click", () => row.remove());
+  rows.appendChild(row);
+}
+
+function collectMapping() {
+  const result = {};
+  for (const row of $("mapping-rows").children) {
+    const [keyEl, valEl] = row.querySelectorAll("input");
+    const k = keyEl.value.trim();
+    const v = valEl.value.trim();
+    if (k && v) result[k] = v;
+  }
+  return result;
+}
+
+$("btn-unlock").addEventListener("click", async () => {
+  adminPassword = $("admin-password").value;
+  try {
+    await refreshStatus();
+    await loadCanvaLists();
+    $("main").classList.remove("hidden");
+    setStatus($("auth-status"), "entsperrt", "ok");
+  } catch (e) {
+    setStatus($("auth-status"), e.message, "bad");
+  }
+});
+
+$("btn-canva").addEventListener("click", () => window.open("/api/oauth/canva/start", "_blank", "width=600,height=700"));
+$("btn-dropbox").addEventListener("click", () => window.open("/api/oauth/dropbox/start", "_blank", "width=600,height=700"));
+$("btn-reload").addEventListener("click", loadCanvaLists);
+$("btn-add-mapping").addEventListener("click", () => addMappingRow());
+
+window.addEventListener("focus", async () => {
+  if (!adminPassword) return;
+  try {
+    await refreshStatus();
+    await loadCanvaLists();
+  } catch (e) {
+    console.warn(e.message);
+  }
+});
+
+$("btn-save").addEventListener("click", async () => {
+  setStatus($("save-status"), "speichere …");
+  try {
+    const body = {
+      dropboxPath: $("dropbox-path").value.trim(),
+      brandTemplateId: $("brand-template").value,
+      canvaFolderId: $("canva-folder").value,
+      fieldMapping: collectMapping(),
+      initCursor: $("init-cursor").checked,
+    };
+    const result = await apiFetch("/api/config", { method: "POST", body: JSON.stringify(body) });
+    setStatus($("save-status"), result.cursorError ? `gespeichert (Cursor-Warnung: ${result.cursorError})` : "gespeichert", "ok");
+  } catch (e) {
+    setStatus($("save-status"), e.message, "bad");
+  }
+});
+
+$("btn-test").addEventListener("click", async () => {
+  const log = $("log");
+  log.classList.remove("hidden");
+  log.textContent = "triggering sync …\n";
+  try {
+    const res = await fetch("/api/worker/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source: "manual" }),
+    });
+    const json = await res.json();
+    log.textContent += JSON.stringify(json, null, 2);
+  } catch (e) {
+    log.textContent += "ERROR: " + e.message;
+  }
+});
+</script>
+</body>
+</html>
